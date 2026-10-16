@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm test:endpoint
+      - name: Endpoint image stores a report
+        run: |
+          docker build -t rewindbug-endpoint examples/endpoint
+          mkdir -m 777 endpoint-data
+          docker run -d -p 127.0.0.1:7358:7358 -v "$PWD/endpoint-data:/data" rewindbug-endpoint
+          node --input-type=module -e '
+            import { gzipSync } from "node:zlib";
+            import { fixture } from "./packages/mcp/src/fixture.ts";
+            for (let i = 0; i < 20; i++) {
+              try {
+                const r = await fetch("http://127.0.0.1:7358/report", { method: "POST", body: gzipSync(JSON.stringify(fixture)) });
+                if (r.status !== 204) throw new Error(`status ${r.status}`);
+                process.exit(0);
+              } catch (error) {
+                if (i === 19) throw error;
+                await new Promise((done) => setTimeout(done, 500));
+              }
+            }'
+          test "$(ls endpoint-data/reports | wc -l)" -eq 2
+      - run: pnpm test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: test-results/
+          retention-days: 7
+      - run: pnpm build

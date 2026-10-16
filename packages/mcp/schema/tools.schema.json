@@ -1,0 +1,383 @@
+{
+  "last_bug": {
+    "input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {}
+    },
+    "output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "bug": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "receivedAt": { "type": "number" },
+                "path": {
+                  "type": "string",
+                  "description": "Absolute path of the full report with rrweb events; large, no need to read it whole"
+                },
+                "report": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": { "type": "number" },
+                    "id": { "type": "string" },
+                    "createdAt": { "type": "number" },
+                    "fingerprint": { "type": "string" },
+                    "trigger": {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string" },
+                        "message": { "type": "string" },
+                        "requestId": { "type": "number" }
+                      },
+                      "required": ["kind", "message"],
+                      "additionalProperties": {}
+                    },
+                    "context": {
+                      "type": "object",
+                      "properties": { "url": { "type": "string" } },
+                      "required": ["url"],
+                      "additionalProperties": {}
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "t": { "type": "number" },
+                          "kind": { "type": "string" },
+                          "target": {
+                            "type": "object",
+                            "properties": {},
+                            "additionalProperties": {}
+                          },
+                          "value": { "type": "string" },
+                          "masked": { "type": "boolean" },
+                          "checked": { "type": "boolean" },
+                          "key": { "type": "string" },
+                          "x": { "type": "number" },
+                          "y": { "type": "number" },
+                          "url": { "type": "string" },
+                          "from": { "type": "string" },
+                          "requestIds": {
+                            "type": "array",
+                            "items": { "type": "number" }
+                          }
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "stepsMarkdown": { "type": "string" },
+                    "test": { "type": "string" },
+                    "console": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "t": { "type": "number" },
+                          "level": { "type": "string" },
+                          "message": { "type": "string" }
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "network": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "number" },
+                          "t": { "type": "number" },
+                          "type": { "type": "string" },
+                          "method": { "type": "string" },
+                          "url": { "type": "string" },
+                          "state": { "type": "string" },
+                          "status": { "type": "number" },
+                          "durationMs": { "type": "number" },
+                          "error": { "type": "string" },
+                          "contentType": { "type": "string" },
+                          "requestBody": { "type": "string" },
+                          "responseBody": { "type": "string" },
+                          "requestBodyTruncated": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "responseBodyTruncated": {
+                            "type": "boolean",
+                            "const": true
+                          }
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": {}
+                    },
+                    "replay": {
+                      "type": "object",
+                      "properties": { "events": { "type": "number" } },
+                      "required": ["events"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "createdAt",
+                    "fingerprint",
+                    "trigger",
+                    "context",
+                    "steps",
+                    "stepsMarkdown",
+                    "test",
+                    "console",
+                    "network",
+                    "limits",
+                    "replay"
+                  ],
+                  "additionalProperties": {}
+                },
+                "trimmed": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["console", "network", "steps", "test", "fields"]
+                  }
+                }
+              },
+              "required": ["id", "receivedAt", "path", "report", "trimmed"],
+              "additionalProperties": false
+            },
+            { "type": "null" }
+          ]
+        },
+        "message": { "type": "string" }
+      },
+      "required": ["bug"],
+      "additionalProperties": false
+    }
+  },
+  "list_bugs": {
+    "input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "limit": {
+          "description": "How many reports to list, 1 to 100, 20 by default",
+          "type": "number"
+        }
+      }
+    },
+    "output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "bugs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "receivedAt": { "type": "number" },
+              "createdAt": { "type": "number" },
+              "kind": { "type": "string" },
+              "message": { "type": "string" },
+              "url": { "type": "string" },
+              "fingerprint": { "type": "string" },
+              "stepsCount": { "type": "number" },
+              "path": { "type": "string" }
+            },
+            "required": [
+              "id",
+              "receivedAt",
+              "createdAt",
+              "kind",
+              "message",
+              "url",
+              "fingerprint",
+              "stepsCount",
+              "path"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "message": { "type": "string" }
+      },
+      "required": ["bugs"],
+      "additionalProperties": false
+    }
+  },
+  "get_bug": {
+    "input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Report id from list_bugs" }
+      },
+      "required": ["id"]
+    },
+    "output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "bug": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "receivedAt": { "type": "number" },
+                "path": {
+                  "type": "string",
+                  "description": "Absolute path of the full report with rrweb events; large, no need to read it whole"
+                },
+                "report": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": { "type": "number" },
+                    "id": { "type": "string" },
+                    "createdAt": { "type": "number" },
+                    "fingerprint": { "type": "string" },
+                    "trigger": {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string" },
+                        "message": { "type": "string" },
+                        "requestId": { "type": "number" }
+                      },
+                      "required": ["kind", "message"],
+                      "additionalProperties": {}
+                    },
+                    "context": {
+                      "type": "object",
+                      "properties": { "url": { "type": "string" } },
+                      "required": ["url"],
+                      "additionalProperties": {}
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "t": { "type": "number" },
+                          "kind": { "type": "string" },
+                          "target": {
+                            "type": "object",
+                            "properties": {},
+                            "additionalProperties": {}
+                          },
+                          "value": { "type": "string" },
+                          "masked": { "type": "boolean" },
+                          "checked": { "type": "boolean" },
+                          "key": { "type": "string" },
+                          "x": { "type": "number" },
+                          "y": { "type": "number" },
+                          "url": { "type": "string" },
+                          "from": { "type": "string" },
+                          "requestIds": {
+                            "type": "array",
+                            "items": { "type": "number" }
+                          }
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "stepsMarkdown": { "type": "string" },
+                    "test": { "type": "string" },
+                    "console": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "t": { "type": "number" },
+                          "level": { "type": "string" },
+                          "message": { "type": "string" }
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "network": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "number" },
+                          "t": { "type": "number" },
+                          "type": { "type": "string" },
+                          "method": { "type": "string" },
+                          "url": { "type": "string" },
+                          "state": { "type": "string" },
+                          "status": { "type": "number" },
+                          "durationMs": { "type": "number" },
+                          "error": { "type": "string" },
+                          "contentType": { "type": "string" },
+                          "requestBody": { "type": "string" },
+                          "responseBody": { "type": "string" },
+                          "requestBodyTruncated": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "responseBodyTruncated": {
+                            "type": "boolean",
+                            "const": true
+                          }
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": {}
+                    },
+                    "replay": {
+                      "type": "object",
+                      "properties": { "events": { "type": "number" } },
+                      "required": ["events"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "createdAt",
+                    "fingerprint",
+                    "trigger",
+                    "context",
+                    "steps",
+                    "stepsMarkdown",
+                    "test",
+                    "console",
+                    "network",
+                    "limits",
+                    "replay"
+                  ],
+                  "additionalProperties": {}
+                },
+                "trimmed": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["console", "network", "steps", "test", "fields"]
+                  }
+                }
+              },
+              "required": ["id", "receivedAt", "path", "report", "trimmed"],
+              "additionalProperties": false
+            },
+            { "type": "null" }
+          ]
+        },
+        "message": { "type": "string" }
+      },
+      "required": ["bug"],
+      "additionalProperties": false
+    }
+  }
+}

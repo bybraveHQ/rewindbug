@@ -1,0 +1,148 @@
+:root {
+  --bg: #fafaf9;
+  --fg: #1c1917;
+  --muted: #57534e;
+  --card: #ffffff;
+  --line: #e7e5e4;
+  --accent: #b91c1c;
+  --code: #f5f5f4;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1917;
+    --fg: #f5f5f4;
+    --muted: #a8a29e;
+    --card: #292524;
+    --line: #44403c;
+    --accent: #f87171;
+    --code: #0c0a09;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 24px 16px;
+  font:
+    16px/1.5 system-ui,
+    sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+header,
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+header p {
+  color: var(--muted);
+}
+
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 16px;
+}
+
+@media (max-width: 760px) {
+  main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+section {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+label {
+  display: block;
+  margin-bottom: 12px;
+}
+
+input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+button {
+  padding: 8px 14px;
+  font: inherit;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button.link {
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+pre {
+  margin: 0 0 12px;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+  background: var(--code);
+  border-radius: 6px;
+}
+
+#headline {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.replay {
+  position: relative;
+  margin-bottom: 8px;
+  overflow: hidden;
+  background: var(--code);
+  border-radius: 6px;
+}
+
+.replay-stage {
+  transform-origin: 0 0;
+}
+
+.replay iframe {
+  border: 0;
+}

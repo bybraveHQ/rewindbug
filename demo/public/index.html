@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>rewindbug demo: break it, get the bug</title>
+    <link rel="stylesheet" href="./main.css" />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="module" src="./main.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>rewindbug demo</h1>
+      <p>
+        Click around the shop, then break it. A second later you get the bug
+        report: reproduction steps, a Playwright test, console and network.
+        Nothing leaves this page: a service worker plays the endpoint.
+      </p>
+      <p id="status" role="status">Starting the service worker…</p>
+    </header>
+    <main>
+      <section class="shop" aria-label="Shop">
+        <div id="cart">
+          <h2>Cart</h2>
+          <ul id="items"></ul>
+          <button type="button" id="checkout" disabled>Checkout</button>
+        </div>
+        <form id="details" hidden>
+          <h2>Checkout</h2>
+          <label>Name <input name="name" autocomplete="off" /></label>
+          <label>Email <input name="email" autocomplete="off" /></label>
+          <label>Coupon <input name="coupon" autocomplete="off" /></label>
+          <p class="hint">Each button breaks the page in its own way.</p>
+          <div class="actions">
+            <button type="button" id="coupon" disabled>Apply coupon</button>
+            <button type="button" id="address" disabled>Save address</button>
+            <button type="button" id="pay" disabled>Pay</button>
+            <button type="button" id="back" class="link" disabled>
+              Back to cart
+            </button>
+          </div>
+          <p class="hint">
+            Apply coupon throws, Save address logs console.error, Pay gets a
+            500. The same bug twice in a row is reported once.
+          </p>
+        </form>
+      </section>
+      <section class="report" aria-label="Bug report">
+        <h2>Bug report</h2>
+        <p id="empty">No bug yet. Break something.</p>
+        <div id="report" hidden>
+          <p id="headline"></p>
+          <a id="download" download="rewindbug-report.json">Download JSON</a>
+          <h3>Replay</h3>
+          <!-- rb-block: the page must not record its own player -->
+          <div
+            id="replay"
+            class="replay rb-block"
+            data-testid="report-replay"
+          ></div>
+          <button type="button" id="replay-again" class="link" hidden>
+            Play again
+          </button>
+          <h3>Steps</h3>
+          <pre id="steps" data-testid="report-steps"></pre>
+          <h3>Playwright test</h3>
+          <pre id="test" data-testid="report-test"></pre>
+          <h3>Console</h3>
+          <pre id="console" data-testid="report-console"></pre>
+          <h3>Network</h3>
+          <pre id="network" data-testid="report-network"></pre>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

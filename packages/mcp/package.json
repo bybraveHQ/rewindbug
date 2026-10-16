@@ -1,0 +1,35 @@
+{
+  "name": "rewindbug-mcp",
+  "version": "0.0.1",
+  "description": "MCP server for rewindbug: receives bug reports on localhost and hands the last bug to your coding agent.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "rewindbug-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "schema",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsup",
+    "schema": "node scripts/schema.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "prettier": "^3.9.10",
+    "tsup": "^9.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.4"
+  }
+}

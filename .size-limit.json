@@ -1,0 +1,15 @@
+[
+  {
+    "name": "core without rrweb",
+    "path": "dist/index.js",
+    "limit": "13 kB",
+    "gzip": true,
+    "ignore": ["@rrweb/record"]
+  },
+  {
+    "name": "browser build with rrweb",
+    "path": "dist/rewindbug.browser.js",
+    "limit": "40 kB",
+    "gzip": true
+  }
+]

@@ -1,0 +1,90 @@
+// pnpm test:endpoint: the server runs as a separate process, and
+// rewindbug-mcp's own store reads what it wrote
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { after, test } from "node:test";
+import { gzipSync } from "node:zlib";
+import { fixture } from "../../packages/mcp/src/fixture.ts";
+import { listSummaries, readReport } from "../../packages/mcp/src/store.ts";
+
+const SERVER = fileURLToPath(new URL("server.mjs", import.meta.url));
+const OVERSIZE_BYTES = 3 * 1024 * 1024;
+const started = [];
+
+const start = async (env = {}) => {
+  const dir = await mkdtemp(join(tmpdir(), "rewindbug-endpoint-"));
+  const child = spawn(process.execPath, [SERVER], {
+    env: { ...process.env, PORT: "0", REWINDBUG_DIR: dir, ...env },
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  started.push({ child, dir });
+  const url = await new Promise((done, fail) => {
+    child.stdout.on("data", (data) => {
+      const match = /listening on (\S+)/.exec(String(data));
+      if (match) done(match[1]);
+    });
+    child.on("exit", (code) => fail(new Error(`server exited: ${code}`)));
+  });
+  return { dir, url };
+};
+
+after(async () => {
+  for (const { child, dir } of started) {
+    child.kill();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+const post = (url, body) => fetch(url, { method: "POST", body });
+
+test("a gzip report lands as a pair that rewindbug-mcp reads", async () => {
+  const { dir, url } = await start();
+  const response = await post(url, gzipSync(JSON.stringify(fixture)));
+  assert.equal(response.status, 204);
+  const files = await readdir(join(dir, "reports"));
+  assert.equal(files.length, 2);
+  const [summary] = await listSummaries(dir);
+  assert.equal(summary?.id, fixture.id);
+  const read = await readReport(dir, fixture.id);
+  assert.equal(read.status, "ok");
+});
+
+test("the same report sent again replaces the older copy", async () => {
+  const { dir, url } = await start();
+  const body = gzipSync(JSON.stringify(fixture));
+  assert.equal((await post(url, body)).status, 204);
+  assert.equal((await post(url, body)).status, 204);
+  assert.equal((await readdir(join(dir, "reports"))).length, 2);
+});
+
+test("bad bodies are refused", async () => {
+  const { url } = await start();
+  assert.equal((await post(url, "not json")).status, 400);
+  assert.equal((await post(url, Buffer.from([0x1f, 0x8b, 1, 2]))).status, 400);
+  // JSON drops a field set to undefined
+  const noVersion = { ...fixture, schemaVersion: undefined };
+  assert.equal((await post(url, JSON.stringify(noVersion))).status, 400);
+  assert.equal((await post(url, Buffer.alloc(OVERSIZE_BYTES))).status, 413);
+});
+
+test("only the report path takes posts", async () => {
+  const { url } = await start();
+  assert.equal((await post(new URL("/other", url), "{}")).status, 404);
+  assert.equal((await fetch(url)).status, 405);
+  const preflight = await fetch(url, { method: "OPTIONS" });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), "*");
+});
+
+test("with a token the plain path is closed", async () => {
+  const token = "test-token";
+  const { url } = await start({ REWINDBUG_TOKEN: token });
+  const open = new URL("/report", url);
+  assert.equal((await post(open, JSON.stringify(fixture))).status, 404);
+  const closed = new URL(`/report/${token}`, url);
+  assert.equal((await post(closed, JSON.stringify(fixture))).status, 204);
+});
