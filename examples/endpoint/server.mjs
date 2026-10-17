@@ -298,6 +298,10 @@ const ISSUE_LINES_MAX = 20;
 const ISSUE_LINE_MAX = 200;
 // GitHub refuses bodies over 65536 characters
 const ISSUE_BODY_MAX = 60_000;
+// report fields are cut before they are escaped, never after: a fence or a
+// code span can at most triple a field, so the head stays under the limit
+const ISSUE_FIELD_MAX = 1000;
+const ISSUE_BLOCK_MAX = 6000;
 const ISSUE_IDS_MAX = 100;
 const GITHUB_TIMEOUT_MS = 10_000;
 const HTTPS = /^https:\/\//;
@@ -425,19 +429,24 @@ const fence = (text, lang = "") => {
   return `${ticks}${lang}\n${text}\n${ticks}`;
 };
 
+const cut = (text, max) =>
+  text.length > max ? `${text.slice(0, max - 1)}…` : text;
+
 const issueBody = (report, base) => {
   const { context, trigger } = report;
   const head = [
-    `**Page:** ${code(context.url)}`,
+    `**Page:** ${code(cut(context.url, ISSUE_FIELD_MAX))}`,
     `**When:** ${new Date(report.createdAt).toISOString()}`,
-    `**Browser:** ${code(context.userAgent)}`,
+    `**Browser:** ${code(cut(String(context.userAgent), ISSUE_FIELD_MAX))}`,
     `**Recording:** ${recordingLink(base)}`,
     "",
     "## Steps",
-    fence(report.stepsMarkdown || "none"),
+    fence(cut(report.stepsMarkdown || "none", ISSUE_BLOCK_MAX)),
     "",
     "## Error",
-    fence(trigger.error?.stack || trigger.message),
+    fence(
+      cut(String(trigger.error?.stack || trigger.message), ISSUE_BLOCK_MAX),
+    ),
   ].join("\n");
   const logs = [
     "## Console",
@@ -466,24 +475,22 @@ const issueBody = (report, base) => {
   const foot = FINGERPRINT.test(report.fingerprint)
     ? `<!-- rewindbug fingerprint: ${report.fingerprint} -->`
     : "";
-  // the limit is met by dropping the logs first, then the test
-  for (const parts of [
+  // the limit is met by dropping the logs first, then the test; the head
+  // alone always fits, so escaped text is never cut
+  const bodies = [
     [head, logs, test],
     [head, test],
     [
       head,
       "_Console, network and the test were cut: the issue would be too long._",
     ],
-  ]) {
-    const body = [...parts, "", foot].join("\n\n");
-    if (body.length <= ISSUE_BODY_MAX) return body;
-  }
-  return [head.slice(0, ISSUE_BODY_MAX - foot.length - 2), foot].join("\n\n");
+  ].map((parts) => [...parts, "", foot].join("\n\n"));
+  return bodies.find((body) => body.length <= ISSUE_BODY_MAX) ?? bodies.at(-1);
 };
 
 const repeatComment = (report, base) =>
   [
-    `Seen again at ${new Date(report.createdAt).toISOString()} on ${code(report.context.url)}, ${report.steps.length} steps.`,
+    `Seen again at ${new Date(report.createdAt).toISOString()} on ${code(cut(report.context.url, ISSUE_FIELD_MAX))}, ${report.steps.length} steps.`,
     `**Recording:** ${recordingLink(base)}`,
   ].join("\n");
 

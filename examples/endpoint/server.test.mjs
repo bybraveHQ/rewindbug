@@ -465,6 +465,34 @@ test("report text stays plain text in a github issue", async () => {
   assert.equal(body.includes("## owned"), false);
 });
 
+test("huge report fields are cut before they are escaped", async () => {
+  const hub = await fakeGithub();
+  const { url } = await start(withGithub(hub));
+  // backtick runs make each fence as long as possible
+  const ticks = "`".repeat(70_000);
+  const huge = {
+    ...fixture,
+    stepsMarkdown: ticks,
+    trigger: {
+      ...fixture.trigger,
+      error: { name: "Error", message: "boom", stack: ticks },
+    },
+    context: {
+      ...fixture.context,
+      url: `${ticks}\n## owned`,
+      userAgent: ticks,
+    },
+  };
+  assert.equal((await post(url, JSON.stringify(huge))).status, 204);
+  await waitFor(() => hub.calls.length === 1);
+  const { body } = hub.calls[0].body;
+  assert.ok(body.length <= 60_000, `body is ${body.length} long`);
+  assert.equal(body.includes("## owned"), false);
+  // every code span in the head is closed on its own line
+  const page = body.split("\n").find((line) => line.startsWith("**Page:**"));
+  assert.match(page ?? "", /^\*\*Page:\*\* (`+) .* \1$/);
+});
+
 test("a github failure keeps the report, and a resend opens the issue", async () => {
   const hub = await fakeGithub([500, 201]);
   const { dir, url } = await start(withGithub(hub));
