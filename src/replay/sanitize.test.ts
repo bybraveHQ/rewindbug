@@ -72,6 +72,43 @@ describe("urls in the recorded DOM", () => {
     ).toHaveLength(4);
   });
 
+  it("filters relative urls, iframe sources and urls inside css", () => {
+    const event: RecordedEvent = {
+      type: 2,
+      timestamp: 1,
+      data: {
+        node: {
+          type: 2,
+          tagName: "div",
+          attributes: { style: `background: url(${page})` },
+          childNodes: [
+            {
+              type: 2,
+              tagName: "form",
+              attributes: { action: "/reset?token=S" },
+            },
+            {
+              type: 2,
+              tagName: "video",
+              attributes: { poster: "/p.png?sig=S" },
+            },
+            { type: 2, tagName: "iframe", attributes: { rr_src: page } },
+            {
+              type: 2,
+              tagName: "style",
+              attributes: { _cssText: `.a { background: url(${page}); }` },
+            },
+          ],
+        },
+      },
+    };
+    sanitizeEvent(event, defaultUrlFilter);
+    const text = JSON.stringify(event);
+    expect(text).not.toMatch(/token=S|sig=S/);
+    expect(text).toContain("/reset?token=*");
+    expect(text).toContain("/p.png?sig=*");
+  });
+
   it("filters url attributes in added nodes and attribute changes", () => {
     const event: RecordedEvent = {
       type: 3,

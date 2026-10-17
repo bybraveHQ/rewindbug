@@ -4,18 +4,21 @@ import type { RecordedEvent } from "./buffer.ts";
 const META = 4;
 const FULL_SNAPSHOT = 2;
 const INCREMENTAL = 3;
-// rrweb makes these absolute, so even href="#main" carries the page's own
-// address with its query: they pass the url filter like the page url does
+// one url each: rrweb makes most absolute, so even href="#main" carries the
+// page's own address with its query, but leaves some relative; all pass the
+// url filter like the page url does
 const URL_ATTRIBUTES = new Set([
   "href",
   "src",
-  "srcset",
+  "rr_src",
   "xlink:href",
   "action",
   "formaction",
   "poster",
   "data",
 ]);
+// text with absolute urls inside: a source list, inline css with url(...)
+const URLS_IN_TEXT_ATTRIBUTES = new Set(["srcset", "style", "_cssText"]);
 const MUTATION_SOURCE = 0;
 const MAX_URL_LENGTH = 2000;
 
@@ -32,7 +35,9 @@ const filterAttributes = (
   if (!attributes) return;
   for (const name in attributes) {
     const value = attributes[name];
-    if (URL_ATTRIBUTES.has(name) && typeof value === "string")
+    if (typeof value !== "string") continue;
+    if (URL_ATTRIBUTES.has(name)) attributes[name] = filter(value);
+    else if (URLS_IN_TEXT_ATTRIBUTES.has(name))
       attributes[name] = filterUrlsInText(value, filter);
   }
 };
