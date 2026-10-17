@@ -213,12 +213,15 @@ export const startReplay = (options: ReplayOptions): Replay => {
         maskAllInputs: options.maskInputs,
         // same rule as the steps: data-rb-unmask shows a value unless it is a
         // password (also one a "show password" button turned into text, which
-        // rrweb marks) or sits under maskSelector
+        // rrweb marks, or one whose autocomplete, name or id says so) or sits
+        // under maskSelector
         maskInputFn: (text, element) =>
           element.closest("[data-rb-unmask]") &&
           (element as HTMLInputElement).type !== "password" &&
           !element.hasAttribute("data-rr-is-password") &&
-          !/password/i.test(element.getAttribute("autocomplete") ?? "") &&
+          !/pass|pwd/i.test(
+            `${element.getAttribute("autocomplete")} ${element.getAttribute("name")} ${element.id}`,
+          ) &&
           !(options.maskSelector && element.closest(options.maskSelector))
             ? text
             : "*".repeat(text.length),

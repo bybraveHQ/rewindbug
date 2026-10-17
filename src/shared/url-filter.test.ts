@@ -54,6 +54,17 @@ describe("filterUrlsInText", () => {
     );
   });
 
+  test("masks socket urls too", () => {
+    expect(
+      filterUrlsInText(
+        "WebSocket failed: wss://rt.example/ws?token=S and ws://localhost:4000/socket?auth=S",
+        defaultUrlFilter,
+      ),
+    ).toBe(
+      "WebSocket failed: wss://rt.example/ws?token=* and ws://localhost:4000/socket?auth=*",
+    );
+  });
+
   test("stops a url at quotes", () => {
     const text = '{"url":"https://a.com/?jwt=x"}';
     expect(filterUrlsInText(text, defaultUrlFilter)).toBe(

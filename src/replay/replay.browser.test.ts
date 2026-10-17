@@ -153,6 +153,25 @@ describe("replay", () => {
     expect(recorded).not.toContain("swordfish");
   });
 
+  it("data-rb-unmask keeps a text field masked when its name says password", async () => {
+    document.body.innerHTML = `
+      <form data-rb-unmask>
+        <input type="text" name="password">
+        <input type="text" id="new-pwd">
+      </form>
+    `;
+    const r = start();
+    await recording(r);
+    const [byName, byId] = [...document.querySelectorAll("input")];
+    if (!byName || !byId) throw new Error("no inputs");
+    await userEvent.type(byName, "hunter2");
+    await userEvent.type(byId, "swordfish");
+    await until(() => events(r).some((e) => e.type === 3));
+    const recorded = JSON.stringify(events(r));
+    expect(recorded).not.toContain("hunter2");
+    expect(recorded).not.toContain("swordfish");
+  });
+
   it("masks text under maskSelector", async () => {
     const p = document.createElement("p");
     p.className = "pii";

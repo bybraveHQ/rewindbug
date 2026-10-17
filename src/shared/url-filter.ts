@@ -3,7 +3,8 @@ export type UrlFilter = (url: string) => string;
 const SECRET_PARAM =
   /^(.*[_-])?(token|key|secret|pass(word)?|auth|session|code|sig(nature)?|jwt|otp)$/i;
 const MASK = "*";
-const URL_IN_TEXT = /https?:\/\/[^\s"'<>()\\]+/gi;
+// ws(s) too: realtime clients put tokens in the query of their socket url
+const URL_IN_TEXT = /(?:https?|wss?):\/\/[^\s"'<>()\\]+/gi;
 const LINE_COL_TAIL = /(:\d+){1,2}$/;
 const FALLBACK_BASE = "http://localhost/";
 
