@@ -26,13 +26,13 @@ jobs:
         run: |
           docker build -t rewindbug-endpoint examples/endpoint
           mkdir -m 777 endpoint-data
-          cid=$(docker run -d -p 127.0.0.1:7358:7358 -v "$PWD/endpoint-data:/data" rewindbug-endpoint)
+          cid=$(docker run -d -p 127.0.0.1:7358:7358 -v "$PWD/endpoint-data:/data" -e REWINDBUG_TOKEN=ci-token rewindbug-endpoint)
           node --input-type=module -e '
             import { gzipSync } from "node:zlib";
             import { fixture } from "./packages/mcp/src/fixture.ts";
             for (let i = 0; i < 20; i++) {
               try {
-                const r = await fetch("http://127.0.0.1:7358/report", { method: "POST", body: gzipSync(JSON.stringify(fixture)) });
+                const r = await fetch("http://127.0.0.1:7358/report/ci-token", { method: "POST", body: gzipSync(JSON.stringify(fixture)) });
                 if (r.status !== 204) throw new Error(`status ${r.status}`);
                 process.exit(0);
               } catch (error) {

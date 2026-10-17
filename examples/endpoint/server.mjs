@@ -13,6 +13,7 @@ const HOST = process.env.HOST || "127.0.0.1";
 const DIR = resolve(process.env.REWINDBUG_DIR || ".rewindbug");
 const TOKEN = process.env.REWINDBUG_TOKEN || "";
 const ORIGIN = process.env.REWINDBUG_ORIGIN || "*";
+const OPEN = process.env.REWINDBUG_OPEN === "1";
 
 const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024;
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -20,6 +21,8 @@ const MAX_REPORTS = 100;
 const MAX_CLOCK_SKEW_MS = 5 * 60_000;
 const MAX_SUMMARY_MESSAGE = 1000;
 const REQUEST_TIMEOUT_MS = 30_000;
+// each request holds up to MAX_COMPRESSED_BYTES + MAX_BODY_BYTES in memory
+const MAX_CONCURRENT = 4;
 const GZIP_MAGIC = [0x1f, 0x8b];
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 const UUID =
@@ -234,6 +237,8 @@ const hostAllowed = (header, port) =>
     header ?? "",
   );
 
+let active = 0;
+
 const server = createServer(
   { requestTimeout: REQUEST_TIMEOUT_MS },
   async (request, response) => {
@@ -246,7 +251,17 @@ const server = createServer(
       }
       if (request.method === "OPTIONS") return respond(response, 204);
       if (request.method !== "POST") return respond(response, 405);
-      respond(response, await receive(request));
+      // the SDK keeps a refused report queued and sends it again later
+      if (active >= MAX_CONCURRENT) {
+        response.setHeader("connection", "close");
+        return respond(response, 503);
+      }
+      active += 1;
+      try {
+        respond(response, await receive(request));
+      } finally {
+        active -= 1;
+      }
     } catch (error) {
       if (error instanceof HttpError) {
         if (error.status === 413) response.setHeader("connection", "close");
@@ -258,10 +273,16 @@ const server = createServer(
   },
 );
 
-if (!LOOPBACK.has(HOST) && !TOKEN)
-  log(
-    `listening on ${HOST} without REWINDBUG_TOKEN: anyone who reaches the port can write reports`,
-  );
+// anyone who reaches an open port could fill the folder an agent reads
+if (!LOOPBACK.has(HOST) && !TOKEN) {
+  if (!OPEN) {
+    log(
+      `refusing to listen on ${HOST} without REWINDBUG_TOKEN; set REWINDBUG_OPEN=1 to accept reports from anyone who reaches the port`,
+    );
+    process.exit(1);
+  }
+  log(`listening on ${HOST} without REWINDBUG_TOKEN: anyone can write reports`);
+}
 
 await mkdir(REPORTS, { recursive: true, mode: 0o700 });
 server.listen(PORT, HOST, () => {

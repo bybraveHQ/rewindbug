@@ -80,6 +80,33 @@ test("only the report path takes posts", async () => {
   assert.equal(preflight.headers.get("access-control-allow-origin"), "*");
 });
 
+test("beyond loopback it needs a token or an explicit opt-out", async () => {
+  await assert.rejects(start({ HOST: "0.0.0.0" }), /server exited: 1/);
+  const { url } = await start({ HOST: "0.0.0.0", REWINDBUG_OPEN: "1" });
+  assert.match(url, /^http:\/\/0\.0\.0\.0:\d+\/report$/);
+});
+
+test("more requests at once than it holds are refused with 503", async () => {
+  const { url } = await start();
+  const target = new URL(url);
+  // bodies that never finish keep four requests open
+  const { request } = await import("node:http");
+  const held = [];
+  for (let i = 0; i < 4; i++) {
+    const req = request(target, { method: "POST" });
+    req.on("error", () => undefined);
+    req.write("{");
+    held.push(req);
+  }
+  const deadline = Date.now() + 2000;
+  let status = 0;
+  while (Date.now() < deadline && status !== 503) {
+    status = (await post(url, JSON.stringify(fixture))).status;
+  }
+  for (const req of held) req.destroy();
+  assert.equal(status, 503);
+});
+
 test("with a token the plain path is closed", async () => {
   const token = "test-token";
   const { url } = await start({ REWINDBUG_TOKEN: token });
