@@ -1,6 +1,6 @@
 {
   "name": "rewindbug",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Rewind the last seconds before a browser error into a ready bug report: steps, replay, console, network, Playwright test. No backend.",
   "license": "MIT",
   "funding": "https://ko-fi.com/bybrave",
@@ -21,6 +21,7 @@
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "repository": {
@@ -38,6 +39,7 @@
     "reproduce"
   ],
   "scripts": {
+    "prepublishOnly": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "dev": "tsup --watch",
     "build": "tsup && size-limit && pnpm --filter rewindbug-mcp build",
     "size": "size-limit",
