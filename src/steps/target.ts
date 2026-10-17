@@ -7,7 +7,13 @@ const BLOCK_CLASS = ".rb-block";
 const GENERATED_ID = /\d{3}|:/;
 const BUTTON_INPUTS = new Set(["button", "submit", "reset"]);
 const TEXTBOX_INPUTS = new Set(["text", "email", "tel", "url"]);
-const NAMED_BY_TEXT = "button, a, [role=button], [role=link]";
+// roles whose accessible name comes from their text
+const NAMED_BY_TEXT = [
+  "button, a, summary",
+  ..."button link tab option menuitem menuitemcheckbox menuitemradio treeitem checkbox radio switch"
+    .split(" ")
+    .map((role) => `[role=${role}]`),
+].join(", ");
 const ROLE_CANDIDATES: Record<string, string> = {
   button: "button, input",
   link: "a[href]",
@@ -32,11 +38,11 @@ export const isEditable = (element: Element): element is HTMLElement =>
 export const collapse = (text: string): string =>
   text.replace(/\s+/g, " ").trim();
 
-export const isMasked = (element: Element, maskText: string): boolean => {
+export const isMasked = (element: Element, maskSelector: string): boolean => {
   if (element.closest(BLOCK_CLASS)) return true;
-  if (!maskText) return false;
+  if (!maskSelector) return false;
   try {
-    return element.closest(maskText) !== null;
+    return element.closest(maskSelector) !== null;
   } catch {
     // an invalid selector must not unmask anything
     return true;
@@ -100,9 +106,9 @@ const labelledBy = (element: Element): string | undefined => {
 
 export const nameOf = (
   element: Element,
-  maskText: string,
+  maskSelector: string,
 ): string | undefined => {
-  if (isMasked(element, maskText)) return undefined;
+  if (isMasked(element, maskSelector)) return undefined;
   // accessible-name order, so Playwright's getByRole finds the same element
   const sources = [
     () => labelledBy(element),
@@ -187,7 +193,7 @@ const nthAmong = (element: Element, matches: Element[]): number | undefined => {
 const nthOf = (
   element: Element,
   target: Pick<Target, "testId" | "role" | "name">,
-  maskText: string,
+  maskSelector: string,
 ): number | undefined => {
   if (target.testId !== undefined) {
     const selector = `[data-testid="${CSS.escape(target.testId)}"]`;
@@ -199,14 +205,14 @@ const nthOf = (
   const matches = [...document.querySelectorAll(selector)].filter(
     (candidate) =>
       roleOf(candidate) === target.role &&
-      nameOf(candidate, maskText) === target.name,
+      nameOf(candidate, maskSelector) === target.name,
   );
   return nthAmong(element, matches);
 };
 
 export const targetOf = (
   element: Element,
-  maskText: string,
+  maskSelector: string,
 ): Target | undefined => {
   try {
     const target: Target = cssPath(element);
@@ -214,10 +220,17 @@ export const targetOf = (
     if (testId) target.testId = testId;
     const role = roleOf(element);
     if (role) target.role = role;
-    const name = nameOf(element, maskText);
+    const name = nameOf(element, maskSelector);
     if (name) target.name = name;
-    const nth = nthOf(element, target, maskText);
-    if (nth !== undefined) target.nth = nth;
+    // without a test id or a role with a name the test falls back to css:
+    // then nth counts the css matches
+    const nth =
+      testId || (role && name)
+        ? nthOf(element, target, maskSelector)
+        : target.unique
+          ? undefined
+          : [...document.querySelectorAll(target.css)].indexOf(element);
+    if (nth !== undefined && nth >= 0) target.nth = nth;
     return target;
   } catch {
     return undefined;

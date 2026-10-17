@@ -8,10 +8,12 @@ const SCROLL_SETTLE_MS = 350;
 
 let steps: Steps | undefined;
 
-const start = (overrides: { maskInputs?: boolean; maskText?: string } = {}) => {
+const start = (
+  overrides: { maskInputs?: boolean; maskSelector?: string } = {},
+) => {
   steps = startSteps({
     maskInputs: overrides.maskInputs ?? true,
-    maskText: overrides.maskText ?? "",
+    maskSelector: overrides.maskSelector ?? "",
     filter: defaultUrlFilter,
   });
   return steps;
@@ -92,18 +94,144 @@ describe("steps", () => {
         kind: "fill",
         target: expect.objectContaining({ name: "Email" }),
         masked: true,
+        inputType: "text",
       },
     ]);
   });
 
-  it("keeps values with maskInputs off, except passwords and maskText", async () => {
+  it("data-rb-unmask keeps a value, never a password or one under maskSelector", async () => {
+    document.body.innerHTML = `
+      <input aria-label="Coupon" data-rb-unmask>
+      <div data-rb-unmask>
+        <input type="password" aria-label="Password">
+        <div class="pii"><input aria-label="Name"></div>
+      </div>
+    `;
+    const s = start({ maskSelector: ".pii" });
+    await userEvent.type($("input"), "WELCOME");
+    await userEvent.type($('[type="password"]'), "hunter2");
+    await userEvent.type($(".pii input"), "Jane");
+    expect(recorded(s)).toEqual([
+      expect.objectContaining({ kind: "fill", value: "WELCOME" }),
+      expect.objectContaining({ kind: "fill", masked: true }),
+      expect.objectContaining({ kind: "fill", masked: true }),
+    ]);
+  });
+
+  it("data-rb-unmask keeps a password masked after show password", async () => {
+    document.body.innerHTML = `
+      <div data-rb-unmask>
+        <input type="password" aria-label="Password">
+        <input autocomplete="current-password" aria-label="PIN">
+      </div>
+    `;
+    const s = start();
+    const field = $<HTMLInputElement>('[type="password"]');
+    field.focus();
+    field.type = "text";
+    await userEvent.type(field, "hunter2");
+    await userEvent.type($("[autocomplete]"), "1234");
+    expect(recorded(s)).toEqual([
+      expect.objectContaining({ kind: "fill", masked: true }),
+      expect.objectContaining({ kind: "fill", masked: true }),
+    ]);
+  });
+
+  it("Enter is one press step, not a press and the click it makes", async () => {
+    document.body.innerHTML = `
+      <button>Toggle</button>
+      <form><input aria-label="Q"><button>Go</button></form>
+    `;
+    document
+      .querySelector("form")
+      ?.addEventListener("submit", (event) => event.preventDefault());
+    const s = start({ maskInputs: false });
+    $<HTMLButtonElement>("button").focus();
+    await userEvent.keyboard("{Enter}");
+    await userEvent.type($("input"), "a{Enter}");
+    await userEvent.click($("form button"));
+    expect(recorded(s).map((step) => step.kind)).toEqual([
+      "press",
+      "fill",
+      "press",
+      "click",
+    ]);
+  });
+
+  it("a field written into the URL while typing is one fill and one navigation", async () => {
+    document.body.innerHTML = '<input aria-label="Search">';
+    const before = location.href;
+    $("input").addEventListener("input", (event) => {
+      const value = (event.target as HTMLInputElement).value;
+      history.replaceState({}, "", `?q=${value}`);
+    });
+    const s = start({ maskInputs: false });
+    await userEvent.type($("input"), "abc");
+    // the first step is the page load
+    const steps = s.snapshot().steps.slice(1);
+    history.replaceState({}, "", before);
+    expect(steps).toEqual([
+      expect.objectContaining({ kind: "fill", value: "abc" }),
+      expect.objectContaining({
+        kind: "navigate",
+        url: expect.stringContaining("?q=abc"),
+      }),
+    ]);
+  });
+
+  it("typing after the URL was written keeps the fill first", async () => {
+    document.body.innerHTML = '<input aria-label="Search">';
+    const before = location.href;
+    const field = $<HTMLInputElement>("input");
+    const s = start({ maskInputs: false });
+    await userEvent.type(field, "ab");
+    history.replaceState({}, "", "?q=ab");
+    await userEvent.type(field, "c");
+    const kinds = s
+      .snapshot()
+      .steps.slice(1)
+      .map((step) => step.kind);
+    history.replaceState({}, "", before);
+    expect(kinds).toEqual(["fill", "navigate"]);
+  });
+
+  it("marks a navigation by back or forward", async () => {
+    const before = location.href;
+    const s = start();
+    history.pushState({}, "", "?page=2");
+    const popped = new Promise((resolve) =>
+      window.addEventListener("popstate", resolve, { once: true }),
+    );
+    history.back();
+    await popped;
+    const last = s.snapshot().steps.at(-1);
+    history.replaceState({}, "", before);
+    // Chromium has the Navigation API and knows the direction
+    expect(last).toMatchObject({ kind: "navigate", popstate: "back" });
+  });
+
+  it("a hash change by script is not back or forward", async () => {
+    const before = location.href;
+    const s = start();
+    const popped = new Promise((resolve) =>
+      window.addEventListener("popstate", resolve, { once: true }),
+    );
+    location.hash = "tab2";
+    await popped;
+    const last = s.snapshot().steps.at(-1);
+    history.replaceState({}, "", before);
+    expect(last).toMatchObject({ kind: "navigate" });
+    expect(last).not.toHaveProperty("popstate");
+  });
+
+  it("keeps values with maskInputs off, except passwords and maskSelector", async () => {
     document.body.innerHTML = `
       <input aria-label="City">
       <input type="password" aria-label="Password">
       <div class="pii"><input aria-label="Name"></div>
       <select aria-label="Size"><option value="s">S</option><option value="m">M</option></select>
     `;
-    const s = start({ maskInputs: false, maskText: ".pii" });
+    const s = start({ maskInputs: false, maskSelector: ".pii" });
     await userEvent.type($("input"), "Kyiv");
     await userEvent.type($('[type="password"]'), "hunter2");
     await userEvent.type($(".pii input"), "Jane");

@@ -100,11 +100,17 @@ export type Step = {
   target?: Target;
   value?: string;
   masked?: true;
+  // the type of an <input> behind a fill, so a masked value can be replaced
+  // by one the field accepts
+  inputType?: string;
   checked?: boolean;
   key?: StepKey;
   x?: number;
   y?: number;
   url?: string;
   from?: string;
+  // back or forward in the browser, not a navigation by the page;
+  // "unknown" where the Navigation API cannot tell the direction
+  popstate?: "back" | "forward" | "unknown";
   requestIds?: number[];
 };

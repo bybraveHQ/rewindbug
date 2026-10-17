@@ -1,17 +1,11 @@
-import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { mkdir, rm, rmdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { expect, test, type Page } from "@playwright/test";
+import {
+  RUN_TIMEOUT_MS,
+  removeGeneratedRoot,
+  runGenerated,
+} from "./generated.ts";
 
-const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const GENERATED = join(ROOT, "e2e/.generated");
-const CLI = join(ROOT, "node_modules/@playwright/test/cli.js");
-const RUN_TIMEOUT_MS = 30_000;
 const TEST_TIMEOUT_MS = RUN_TIMEOUT_MS + 15_000;
-const run = promisify(execFile);
 
 test.setTimeout(TEST_TIMEOUT_MS);
 
@@ -25,49 +19,7 @@ const breakWith = async (page: Page, button: string) => {
   return (await page.getByTestId("report-test").textContent()) ?? "";
 };
 
-// the generated test runs as is in a Playwright of its own: it must reach
-// the same bug, so it fails while the bug is there
-const runGenerated = async (source: string) => {
-  const dir = join(GENERATED, randomUUID());
-  await mkdir(dir, { recursive: true });
-  try {
-    await writeFile(join(dir, "bug.spec.ts"), source);
-    await writeFile(
-      join(dir, "playwright.config.ts"),
-      'export default { testDir: ".", outputDir: "results", reporter: "line", workers: 1 };\n',
-    );
-    try {
-      const done = await run(
-        process.execPath,
-        [CLI, "test", "--config", join(dir, "playwright.config.ts")],
-        {
-          cwd: dir,
-          timeout: RUN_TIMEOUT_MS,
-          env: { ...process.env, FORCE_COLOR: "0", CI: "" },
-        },
-      );
-      return { status: 0, output: done.stdout + done.stderr };
-    } catch (error) {
-      const failed = error as {
-        code?: number;
-        stdout?: string;
-        stderr?: string;
-      };
-      return {
-        status: failed.code ?? null,
-        output: `${failed.stdout ?? ""}${failed.stderr ?? ""}`,
-      };
-    }
-  } finally {
-    // the nested run may still be writing its results when it exits
-    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
-  }
-};
-
-// workers of other projects may still be inside: only an empty root goes
-test.afterAll(async () => {
-  await rmdir(GENERATED).catch(() => undefined);
-});
+test.afterAll(removeGeneratedRoot);
 
 test("an exception gives a report whose test reproduces it", async ({
   page,
@@ -94,8 +46,11 @@ test("console.error gives a report whose test reproduces it", async ({
 
 test("a 500 gives a report whose test reproduces it", async ({ page }) => {
   const source = await breakWith(page, "Pay");
-  await expect(page.getByTestId("report-network")).toContainText(
-    "POST /api/pay 500",
+  const network = page.getByTestId("report-network");
+  await expect(network).toContainText("POST /api/pay 500");
+  await expect(network).toContainText('sent: {"total":144}');
+  await expect(network).toContainText(
+    'received: {"error":"payment provider timed out"}',
   );
   expect(source).toContain("waitForResponse");
   const run = await runGenerated(source);
@@ -115,7 +70,8 @@ test("inputs are masked in the steps and in the test", async ({ page }) => {
   const source = await breakWith(page, "Apply coupon");
   await expect(page.getByTestId("report-steps")).not.toContainText("Ada");
   expect(source).not.toContain("Ada");
-  expect(source).toContain('"<masked>"');
+  expect(source).toContain('"Name": "test",');
+  expect(source).toContain('.fill(input["Name"]);');
 });
 
 test("a hard reload still gets the page under the worker", async ({

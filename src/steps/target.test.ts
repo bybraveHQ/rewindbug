@@ -88,7 +88,7 @@ describe("nameOf", () => {
     expect(nameOf($("button"), "")).toHaveLength(40);
   });
 
-  test("no name inside maskText or .rb-block, an invalid selector masks", () => {
+  test("no name inside maskSelector or .rb-block, an invalid selector masks", () => {
     html(`
       <div class="pii"><button id="a">Jane Roe</button></div>
       <div class="rb-block"><button id="b">Card</button></div>
@@ -154,5 +154,31 @@ describe("targetOf", () => {
     });
     html('<button data-testid="only">x</button>');
     expect(targetOf($("button"), "")).not.toHaveProperty("nth");
+  });
+});
+
+describe("names and indexes for a click", () => {
+  test.each(["tab", "option", "menuitem", "treeitem", "switch"])(
+    "a %s is named by its text",
+    (role) => {
+      html(`<div role="${role}"><span>Delete</span></div>`);
+      expect(nameOf($("div"), "")).toBe("Delete");
+    },
+  );
+
+  test("a css path that matches several elements carries the index", () => {
+    const card =
+      "<div><div><div><div><div><span>Open</span></div></div></div></div></div>";
+    html(`<section>${card}${card}${card}</section>`);
+    const second = document.querySelectorAll("span")[1];
+    if (!second) throw new Error("no span");
+    const target = targetOf(second, "");
+    expect(target).toMatchObject({ unique: false, nth: 1 });
+    expect(document.querySelectorAll(target?.css ?? "")[1]).toBe(second);
+  });
+
+  test("a unique css path has no index", () => {
+    html("<main><p>One</p></main>");
+    expect(targetOf($("p"), "")).not.toHaveProperty("nth");
   });
 });

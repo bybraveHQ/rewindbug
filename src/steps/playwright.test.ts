@@ -4,6 +4,7 @@ import type { NetworkEntry, Step, Target, Trigger } from "../types.ts";
 import { playwrightTest, type TestSource } from "./playwright.ts";
 
 const START = "https://app.example/cart";
+const LIST = "https://app.example/list";
 
 const target = (extra: Partial<Target> = {}): Target => ({
   css: "main > button:nth-of-type(2)",
@@ -35,8 +36,12 @@ const body = (input: TestSource): string[] =>
         !text.startsWith("import ") &&
         !text.startsWith("test(") &&
         text !== "});" &&
-        !text.includes("errors"),
+        !text.includes("errors") &&
+        !text.startsWith("// baseURL from") &&
+        !text.startsWith("const at ="),
     );
+
+const GOTO = 'await page.goto(at("/cart"));';
 
 describe("playwrightTest", () => {
   test("starts at range.startUrl and drops the matching first navigate", () => {
@@ -46,10 +51,21 @@ describe("playwrightTest", () => {
         { t: 2, kind: "click", target: target({ testId: "pay" }) },
       ]),
     );
-    expect(lines).toEqual([
-      `await page.goto("${START}");`,
-      'await page.getByTestId("pay").click();',
-    ]);
+    expect(lines).toEqual([GOTO, 'await page.getByTestId("pay").click();']);
+  });
+
+  test("resolves the start against baseURL, else the report's origin", () => {
+    const code = playwrightTest(source([]));
+    expect(code).toContain("async ({ page, baseURL }) => {");
+    expect(code).toContain(
+      'const at = (path: string) => new URL(path, baseURL ?? "https://app.example").href;',
+    );
+    const query = playwrightTest(
+      source([], {
+        range: { start: 0, end: 1, startUrl: `${START}?step=2#pay` },
+      }),
+    );
+    expect(query).toContain('await page.goto(at("/cart?step=2#pay"));');
   });
 
   test("picks the locator tier: test id, role and name, css", () => {
@@ -83,7 +99,7 @@ describe("playwrightTest", () => {
     ]);
   });
 
-  test("adds nth to role and test id, not to css", () => {
+  test("adds nth to role, test id and a css path that matches several", () => {
     const lines = body(
       source([
         {
@@ -93,12 +109,20 @@ describe("playwrightTest", () => {
         },
         { t: 2, kind: "click", target: target({ testId: "row", nth: 0 }) },
         { t: 3, kind: "click", target: target({ nth: 3 }) },
+        { t: 4, kind: "click", target: target({ unique: false, nth: 1 }) },
+        {
+          t: 5,
+          kind: "click",
+          target: target({ unique: false, role: "presentation", name: "Pay" }),
+        },
       ]),
     );
     expect(lines.slice(1)).toEqual([
       'await page.getByRole("button", { name: "Add", exact: true }).nth(2).click();',
       'await page.getByTestId("row").nth(0).click();',
       'await page.locator("main > button:nth-of-type(2)").click();',
+      'await page.locator("main > button:nth-of-type(2)").nth(1).click();',
+      "// click on main > button:nth-of-type(2): several elements match, pick the right one",
     ]);
   });
 
@@ -154,14 +178,14 @@ describe("playwrightTest", () => {
         },
       ]),
     );
-    expect(lines.slice(1)).toEqual([
+    expect(lines.slice(lines.indexOf(GOTO) + 1)).toEqual([
       'await page.getByRole("textbox", { name: "Email", exact: true }).fill("a@b.c");',
-      "// masked input: put test data here",
-      'await page.getByRole("textbox", { name: "Email", exact: true }).fill("<masked>");',
+      'await page.getByRole("textbox", { name: "Email", exact: true }).fill(input["Email"]);',
       'await page.getByRole("checkbox", { name: "Terms", exact: true }).check();',
       'await page.getByRole("checkbox", { name: "News", exact: true }).uncheck();',
       'await page.getByRole("combobox", { name: "Country", exact: true }).selectOption("ua");',
-      '// masked select: pick an option in page.getByRole("combobox", { name: "Card", exact: true })',
+      "// masked: the report does not say which option was chosen",
+      'await page.getByRole("combobox", { name: "Card", exact: true }).selectOption({ index: 1 });',
       'await page.getByRole("textbox", { name: "Email", exact: true }).press("Enter");',
       'await page.keyboard.press("Escape");',
       "await page.evaluate(() => window.scrollTo(0, 840));",
@@ -169,7 +193,42 @@ describe("playwrightTest", () => {
     ]);
   });
 
-  test("waits for a navigation within a second of a click, goes to others", () => {
+  test("puts masked values into one input object, by input type", () => {
+    const field = (name: string, inputType?: string): Step => ({
+      t: 1,
+      kind: "fill",
+      target: target({ role: "textbox", name }),
+      masked: true,
+      ...(inputType && { inputType }),
+    });
+    const lines = body(
+      source([
+        field("Email", "email"),
+        field("Qty", "number"),
+        field("When", "date"),
+        field("Password", "password"),
+        field("Note"),
+        field("Email", "email"),
+        { t: 2, kind: "fill", target: target(), masked: true },
+      ]),
+    );
+    expect(lines.slice(0, lines.indexOf(GOTO))).toEqual([
+      "// typed values are masked in the report: put your test data here",
+      "const input = {",
+      '"Email": "user@example.com",',
+      '"Qty": "1",',
+      '"When": "2025-01-15",',
+      '"Password": process.env.TEST_PASSWORD ?? "password",',
+      '"Note": "test",',
+      '"field 7": "test",',
+      "};",
+    ]);
+    expect(lines.at(-1)).toBe(
+      'await page.locator("main > button:nth-of-type(2)").fill(input["field 7"]);',
+    );
+  });
+
+  test("waits for every navigation the page makes", () => {
     const lines = body(
       source([
         { t: 1000, kind: "click", target: target({ testId: "next" }) },
@@ -189,9 +248,42 @@ describe("playwrightTest", () => {
       ]),
     );
     expect(lines.slice(3)).toEqual([
-      "// navigates to https://app.example/pay?token=*",
+      "// the page navigates to https://app.example/pay?token=*",
       'await page.waitForURL((url) => url.pathname === "/pay" && url.searchParams.has("token"));',
-      'await page.goto("https://app.example/done");',
+      "// the page navigates to https://app.example/done",
+      'await page.waitForURL((url) => url.pathname === "/done");',
+    ]);
+  });
+
+  test("goes back on popstate without a click, waits after a masked fill by path", () => {
+    const lines = body(
+      source([
+        { t: 1000, kind: "navigate", url: LIST, popstate: "back" },
+        { t: 1500, kind: "navigate", url: START, popstate: "forward" },
+        { t: 1700, kind: "navigate", url: LIST, popstate: "unknown" },
+        { t: 2000, kind: "click", target: target({ testId: "back" }) },
+        { t: 2100, kind: "navigate", url: START, popstate: "back" },
+        {
+          t: 3000,
+          kind: "fill",
+          target: target({ role: "searchbox", name: "Search" }),
+          masked: true,
+        },
+        { t: 3100, kind: "navigate", url: `${START}?q=*` },
+      ]),
+    );
+    expect(lines.slice(lines.indexOf(GOTO) + 1)).toEqual([
+      `// back to ${LIST}`,
+      "await page.goBack();",
+      `// forward to ${START}`,
+      "await page.goForward();",
+      `// back or forward to ${LIST}: the browser did not say which`,
+      'await page.getByTestId("back").click();',
+      `// the page navigates to ${START}`,
+      'await page.waitForURL((url) => url.pathname === "/cart");',
+      'await page.getByRole("searchbox", { name: "Search", exact: true }).fill(input["Search"]);',
+      `// the page navigates to ${START}?q=*`,
+      'await page.waitForURL((url) => url.pathname === "/cart");',
     ]);
   });
 
@@ -347,7 +439,7 @@ describe("playwrightTest", () => {
       .split("\n")
       .map((text) => text.trim());
     const wait = lines.findIndex((text) => text.startsWith("const failing"));
-    expect(lines[wait + 1]).toBe(`await page.goto("${START}");`);
+    expect(lines[wait + 1]).toBe(GOTO);
     expect(lines[wait + 2]).toBe("expect((await failing).ok()).toBe(true);");
   });
 
@@ -393,12 +485,12 @@ describe("playwrightTest", () => {
     // a raw line terminator would end a // comment early
     expect(code).not.toMatch(/[\r\u2028\u2029]/);
     expect(lines[2]).toBe(
-      `test(${JSON.stringify(`boom }); await page.close();${"y".repeat(52)}`)}, async ({ page }) => {`,
+      `test(${JSON.stringify(`boom }); await page.close();${"y".repeat(52)}`)}, async ({ page, baseURL }) => {`,
     );
     // the only page.close is inside a string literal or a comment
     for (const text of lines.filter((l) => l.includes("page.close()")))
       expect(text.trim()).toMatch(
-        /^(\/\/|await page\.(getByRole|goto)\(|test\()/,
+        /^(\/\/|await page\.(getByRole|goto|waitForURL)\(|test\()/,
       );
     expect(code).toContain(
       `.fill(${JSON.stringify(evil).replace("\u2028", "\\u2028")});`,
@@ -462,7 +554,9 @@ describe("playwrightTest", () => {
     const code = playwrightTest(
       source([], { trigger: { kind: "manual", at: 1, message: "  " } }),
     );
-    expect(code).toContain('test("rewindbug report", async ({ page }) => {');
+    expect(code).toContain(
+      'test("rewindbug report", async ({ page, baseURL }) => {',
+    );
     expect(
       code.startsWith('import { test, expect } from "@playwright/test";\n'),
     ).toBe(true);

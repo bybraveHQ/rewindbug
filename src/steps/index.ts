@@ -11,6 +11,9 @@ const MAX_VALUE_LENGTH = 200;
 const MAX_URL_LENGTH = 2000;
 const SCROLL_DEBOUNCE_MS = 300;
 const LABEL_FORWARD_MS = 50;
+// Enter on a button, a link or a form field clicks it right away
+const ENTER_CLICK_MS = 50;
+const UNMASK = "[data-rb-unmask]";
 // interactive roles only: a click inside a dialog or main is not on them
 const ROLES = [
   "button",
@@ -54,7 +57,7 @@ const FILL_INPUTS = new Set([
 
 export type StepsOptions = {
   maskInputs: boolean;
-  maskText: string;
+  maskSelector: string;
   filter: UrlFilter;
   now?: () => number;
 };
@@ -71,6 +74,13 @@ export type Steps = {
 
 type PendingScroll = { timer: ReturnType<typeof setTimeout>; step: Step };
 type HistoryMethod = History["pushState"];
+type Navigation = { currentEntry?: { index: number } | null };
+
+// the Navigation API knows the history index, so back from forward
+const historyIndex = (): number | undefined =>
+  (globalThis as { navigation?: Navigation }).navigation?.currentEntry?.index;
+
+const withoutHash = (url: string) => url.split("#")[0];
 
 const isCheckable = (element: Element): element is HTMLInputElement =>
   element instanceof HTMLInputElement &&
@@ -89,6 +99,13 @@ const fieldValue = (field: HTMLElement): string =>
     ? field.value
     : (field.textContent ?? "");
 
+// a field a "show password" button turned into text: its type when it got
+// focus, rrweb's mark, or its autocomplete still say what it is
+const isPassword = (field: Element): boolean =>
+  (field as HTMLInputElement).type === "password" ||
+  field.hasAttribute("data-rr-is-password") ||
+  /password/i.test(field.getAttribute("autocomplete") ?? "");
+
 const asElement = (target: EventTarget | null): Element | undefined =>
   target instanceof Element ? target : undefined;
 
@@ -102,7 +119,12 @@ export const startSteps = (options: StepsOptions): Steps => {
   const passwords = new WeakSet<HTMLElement>();
   let lastFill: { field: HTMLElement; step: Step } | undefined;
   let labelForward: { control: Element; t: number } | undefined;
+  let enter: { element: Element; t: number } | undefined;
+  // a field that writes itself into the URL while typing: one fill, one
+  // navigation, not a pair per key
+  let typing: { fill: Step; navigate: Step } | undefined;
   let href = location.href;
+  let index = historyIndex();
 
   const push = (step: Step) => {
     buffer.push(step);
@@ -124,7 +146,9 @@ export const startSteps = (options: StepsOptions): Steps => {
     };
 
   const masked = (field: Element, password: boolean) =>
-    password || options.maskInputs || isMasked(field, options.maskText);
+    password ||
+    isMasked(field, options.maskSelector) ||
+    (options.maskInputs && !field.closest(UNMASK));
 
   const valueFields = (field: Element, raw: string, password: boolean) =>
     masked(field, password)
@@ -132,7 +156,7 @@ export const startSteps = (options: StepsOptions): Steps => {
       : { value: collapse(raw).slice(0, MAX_VALUE_LENGTH) };
 
   const target = (element: Element) => {
-    const result = targetOf(element, options.maskText);
+    const result = targetOf(element, options.maskSelector);
     return result ? { target: result } : {};
   };
 
@@ -147,6 +171,18 @@ export const startSteps = (options: StepsOptions): Steps => {
       t - labelForward.t < LABEL_FORWARD_MS
     ) {
       labelForward = undefined;
+      return;
+    }
+    // the click Enter makes on the element or on its form's submit button is
+    // the press step already
+    if (
+      event.detail === 0 &&
+      enter &&
+      t - enter.t < ENTER_CLICK_MS &&
+      (enter.element === element ||
+        (element.closest("form") ?? enter) === enter.element.closest("form"))
+    ) {
+      enter = undefined;
       return;
     }
     // a checkbox or radio, or a label for one, is recorded as check
@@ -167,13 +203,18 @@ export const startSteps = (options: StepsOptions): Steps => {
     const field = origin && fillField(origin);
     if (!field) return;
     // a password stays masked after a "show password" toggle
-    if (field instanceof HTMLInputElement && field.type === "password")
-      passwords.add(field);
+    if (isPassword(field)) passwords.add(field);
     const t = now();
     const values = valueFields(field, fieldValue(field), passwords.has(field));
-    if (lastFill?.field === field && lastStep === lastFill.step) {
+    if (
+      lastFill?.field === field &&
+      (lastStep === lastFill.step ||
+        (typing?.fill === lastFill.step && lastStep === typing.navigate))
+    ) {
       const step = lastFill.step;
       step.t = t;
+      // the URL the field wrote stays after the fill in time order
+      if (typing?.fill === step) typing.navigate.t = t;
       if (step.masked || values.masked) {
         delete step.value;
         step.masked = true;
@@ -182,7 +223,13 @@ export const startSteps = (options: StepsOptions): Steps => {
       }
       return;
     }
-    const step: Step = { t, kind: "fill", ...target(field), ...values };
+    const step: Step = {
+      t,
+      kind: "fill",
+      ...target(field),
+      ...values,
+      ...(field instanceof HTMLInputElement && { inputType: field.type }),
+    };
     push(step);
     lastFill = { field, step };
   });
@@ -209,9 +256,15 @@ export const startSteps = (options: StepsOptions): Steps => {
     }
   });
 
+  const onFocus = guard((event: FocusEvent) => {
+    const field = asElement(event.target);
+    if (field && isPassword(field)) passwords.add(field as HTMLElement);
+  });
+
   const onKeydown = guard((event: KeyboardEvent) => {
     if (!KEYS.has(event.key)) return;
     const element = asElement(event.target);
+    if (event.key === "Enter" && element) enter = { element, t: now() };
     push({
       t: now(),
       kind: "press",
@@ -261,13 +314,42 @@ export const startSteps = (options: StepsOptions): Steps => {
 
   // same address twice (popstate + hashchange, replaceState of state only)
   // is one step
-  const onNavigate = () => {
+  const onNavigate = (how?: "replace" | "popstate") => {
     if (!active) return;
     try {
       const next = location.href;
       if (next === href) return;
-      push({ t: now(), kind: "navigate", url: url(next), from: url(href) });
+      const previous = href;
+      const from = index;
       href = next;
+      index = historyIndex();
+      if (how === "replace" && typing && lastStep === typing.navigate) {
+        typing.navigate.t = now();
+        typing.navigate.url = url(next);
+        return;
+      }
+      const typed = lastFill && lastStep === lastFill.step && lastFill.step;
+      const step: Step = {
+        t: now(),
+        kind: "navigate",
+        url: url(next),
+        from: url(previous),
+        // a hash change fires popstate too: only a new page is back or forward
+        ...(how === "popstate" &&
+          withoutHash(next) !== withoutHash(previous) && {
+            popstate:
+              from === undefined || index === undefined
+                ? ("unknown" as const)
+                : index < from
+                  ? ("back" as const)
+                  : ("forward" as const),
+          }),
+      };
+      push(step);
+      typing =
+        how === "replace" && typed
+          ? { fill: typed, navigate: step }
+          : undefined;
     } catch {
       // navigation tracking must not break the host router
     }
@@ -277,7 +359,7 @@ export const startSteps = (options: StepsOptions): Steps => {
     const original: HistoryMethod = history[name];
     const wrapper: HistoryMethod = function (this: History, ...args) {
       const result = original.apply(this, args);
-      onNavigate();
+      onNavigate(name === "replaceState" ? "replace" : undefined);
       return result;
     };
     try {
@@ -298,9 +380,10 @@ export const startSteps = (options: StepsOptions): Steps => {
     [document, "input", onInput],
     [document, "change", onChange],
     [document, "keydown", onKeydown as EventListener],
+    [document, "focusin", onFocus as EventListener],
     [document, "scroll", onScroll],
-    [window, "popstate", onNavigate],
-    [window, "hashchange", onNavigate],
+    [window, "popstate", () => onNavigate("popstate")],
+    [window, "hashchange", () => onNavigate()],
   ];
   for (const [target, type, listener] of listeners)
     target.addEventListener(type, listener, { capture: true, passive: true });

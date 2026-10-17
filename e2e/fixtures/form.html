@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <title>Order form</title>
+  <form id="order">
+    <label>Email <input type="email" required /></label>
+    <label>Quantity <input type="number" min="1" required /></label>
+    <label
+      >Size
+      <select required>
+        <option value="">Choose</option>
+        <option>S</option>
+        <option>M</option>
+      </select></label
+    >
+    <button>Order</button>
+  </form>
+  <script type="module">
+    import { init } from "/rewindbug.browser.js";
+    window.started = init({
+      endpoint: `${location.origin}/report${location.search}`,
+    });
+    // submit fires only when every field holds a value the browser accepts
+    document.getElementById("order").addEventListener("submit", (event) => {
+      event.preventDefault();
+      throw new Error("order broke");
+    });
+  </script>
+</html>

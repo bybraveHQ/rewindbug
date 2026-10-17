@@ -20,6 +20,22 @@ const ROLES = new Set(
   ).split(" "),
 );
 const INDENT = "  ";
+// a value each input type accepts, in place of a masked one
+const SAMPLES: Record<string, string> = {
+  email: "user@example.com",
+  number: "1",
+  tel: "+15550100",
+  url: "https://example.com",
+  date: "2025-01-15",
+  time: "12:00",
+  "datetime-local": "2025-01-15T12:00",
+  month: "2025-01",
+  week: "2025-W03",
+  color: "#336699",
+  range: "50",
+};
+const SAMPLE_TEXT = "test";
+const PASSWORD = 'process.env.TEST_PASSWORD ?? "password"';
 
 // U+2028 and U+2029 stay raw in JSON and break the line in older tools
 const str = (value: string): string =>
@@ -64,18 +80,23 @@ const urlIs = (raw: string): string => {
   return checks.join(" && ");
 };
 
-const locator = (target: Target | undefined): string | undefined => {
+// undefined: no target; null: a css path that matches several elements
+// and no index among them
+const locator = (target: Target | undefined): string | null | undefined => {
   if (!target) return undefined;
   let base = `page.locator(${str(target.css)})`;
-  // nth is counted among role or test id matches, not css ones
-  let nth: number | undefined;
+  // nth counts the matches of what was recorded: test id, role and name,
+  // or css when there is neither
+  let nth = target.nth;
   if (target.testId !== undefined) {
     base = `page.getByTestId(${str(target.testId)})`;
-    nth = target.nth;
   } else if (target.role && target.name && ROLES.has(target.role)) {
     const exact = target.name.length < MAX_NAME_LENGTH ? ", exact: true" : "";
     base = `page.getByRole(${str(target.role)}, { name: ${str(target.name)}${exact} })`;
-    nth = target.nth;
+  } else if (target.unique) {
+    nth = undefined;
+  } else if (target.role && target.name) {
+    return null;
   }
   return nth === undefined ? base : `${base}.nth(${nth})`;
 };
@@ -93,38 +114,68 @@ const requestLine = (entry: NetworkEntry): string => {
   return `// -> ${line(`${entry.method} ${path(entry.url, true)} ${outcome}`)}${duration}`;
 };
 
-const action = (step: Step, previous: Step | undefined): string[] => {
+// the key a masked field gets in the `input` object of the test
+const inputKey = (step: Step, index: number): string =>
+  line(step.target?.name ?? "") || `field ${index + 1}`;
+
+const sample = (step: Step): string =>
+  step.inputType === "password"
+    ? PASSWORD
+    : str(SAMPLES[step.inputType ?? ""] ?? SAMPLE_TEXT);
+
+const action = (
+  step: Step,
+  previous: Step | undefined,
+  key: string | undefined,
+): string[] => {
   const where = locator(step.target);
+  if (where === null)
+    return [
+      `// ${step.kind} on ${line(step.target?.css ?? "")}: several elements match, pick the right one`,
+    ];
   const on = where ?? 'page.locator("body")';
   const at = (n: number | undefined) => (Number.isFinite(n) ? Number(n) : 0);
   switch (step.kind) {
     case "navigate": {
       const url = step.url ?? "";
-      const follows =
+      const acted =
         previous &&
         (previous.kind === "click" || previous.kind === "press") &&
         step.t - previous.t <= FOLLOW_MS;
-      return follows
-        ? [
-            `// navigates to ${line(url)}`,
-            `await page.waitForURL((url) => ${urlIs(url)});`,
-          ]
-        : [`await page.goto(${str(url)});`];
+      if (step.popstate && !acted)
+        return step.popstate === "unknown"
+          ? [
+              `// back or forward to ${line(url)}: the browser did not say which`,
+            ]
+          : [
+              `// ${step.popstate} to ${line(url)}`,
+              `await page.${step.popstate === "back" ? "goBack" : "goForward"}();`,
+            ];
+      // a query written while typing holds what was typed then, which the
+      // test does not type exactly
+      const check =
+        previous?.kind === "fill"
+          ? `url.pathname === ${str(path(url))}`
+          : urlIs(url);
+      return [
+        `// the page navigates to ${line(url)}`,
+        `await page.waitForURL((url) => ${check});`,
+      ];
     }
     case "click":
       return [`await ${on}.click();`];
     case "fill":
-      return step.masked
-        ? [
-            "// masked input: put test data here",
-            `await ${on}.fill("<masked>");`,
-          ]
-        : [`await ${on}.fill(${str(step.value ?? "")});`];
+      return [
+        `await ${on}.fill(${key === undefined ? str(step.value ?? "") : `input[${str(key)}]`});`,
+      ];
     case "check":
       return [`await ${on}.${step.checked ? "check" : "uncheck"}();`];
     case "select":
       return step.masked || step.value === undefined
-        ? [`// masked select: pick an option in ${line(where ?? "the field")}`]
+        ? [
+            "// masked: the report does not say which option was chosen",
+            `await ${on}.selectOption({ index: 1 });`,
+          ]
         : [`await ${on}.selectOption(${str(step.value)});`];
     case "press":
       return [
@@ -146,6 +197,23 @@ const waitFor = (entry: NetworkEntry): string =>
 
 const ASSERT_RESPONSE = "expect((await failing).ok()).toBe(true);";
 
+const startPath = (raw: string): string => {
+  try {
+    const url = new URL(raw);
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return raw;
+  }
+};
+
+const origin = (raw: string): string => {
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return "http://localhost";
+  }
+};
+
 export const playwrightTest = (source: TestSource): string => {
   const { trigger, range, network } = source;
   const requests = new Map(network.map((entry) => [entry.id, entry]));
@@ -160,7 +228,26 @@ export const playwrightTest = (source: TestSource): string => {
     ? steps.find((step) => step.requestIds?.includes(failing.id))
     : undefined;
 
-  const body: string[] = [];
+  const keys = new Map<Step, string>();
+  const inputs = new Map<string, string>();
+  steps.forEach((step, index) => {
+    if (step.kind !== "fill" || !step.masked) return;
+    const key = inputKey(step, index);
+    keys.set(step, key);
+    if (!inputs.has(key)) inputs.set(key, sample(step));
+  });
+
+  const body: string[] = [
+    "// baseURL from playwright.config, else the report's origin; a login needs storageState",
+    `const at = (path: string) => new URL(path, baseURL ?? ${str(origin(range.startUrl))}).href;`,
+  ];
+  if (inputs.size > 0)
+    body.push(
+      "// typed values are masked in the report: put your test data here",
+      "const input = {",
+      ...[...inputs].map(([key, value]) => `${INDENT}${str(key)}: ${value},`),
+      "};",
+    );
   if (trigger.kind === "error" || trigger.kind === "unhandledrejection")
     body.push(
       "const errors: Error[] = [];",
@@ -173,12 +260,12 @@ export const playwrightTest = (source: TestSource): string => {
     );
   // a request with no step behind it starts with the page itself
   if (failing && !linked) body.push(waitFor(failing));
-  body.push(`await page.goto(${str(range.startUrl)});`);
+  body.push(`await page.goto(at(${str(startPath(range.startUrl))}));`);
 
   let previous: Step | undefined;
   for (const step of steps) {
     if (failing && step === linked) body.push(waitFor(failing));
-    body.push(...action(step, previous));
+    body.push(...action(step, previous, keys.get(step)));
     for (const id of step.requestIds ?? []) {
       const entry = requests.get(id);
       if (entry) body.push(requestLine(entry));
@@ -197,7 +284,7 @@ export const playwrightTest = (source: TestSource): string => {
   return [
     'import { test, expect } from "@playwright/test";',
     "",
-    `test(${str(title)}, async ({ page }) => {`,
+    `test(${str(title)}, async ({ page, baseURL }) => {`,
     ...body.map((text) => INDENT + text),
     "});",
     "",

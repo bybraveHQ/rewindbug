@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <title>Cards</title>
+  <section id="cards"></section>
+  <script type="module">
+    import { init } from "/rewindbug.browser.js";
+    window.started = init({
+      endpoint: `${location.origin}/report${location.search}`,
+    });
+    const cards = document.getElementById("cards");
+    for (let i = 1; i <= 3; i++) {
+      const card = document.createElement("div");
+      card.innerHTML =
+        "<div><div><div><div><span>Open</span></div></div></div></div>";
+      card.querySelector("span").addEventListener("click", () => {
+        if (i === 2) throw new Error("card 2 broke");
+      });
+      cards.append(card);
+    }
+  </script>
+</html>

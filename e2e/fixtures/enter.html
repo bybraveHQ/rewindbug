@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <title>Enter</title>
+  <form id="search">
+    <label>Search <input name="q" /></label><button>Go</button>
+  </form>
+  <script type="module">
+    import { init } from "/rewindbug.browser.js";
+    window.started = init({
+      endpoint: `${location.origin}/report${location.search}`,
+    });
+    let submits = 0;
+    document.getElementById("search").addEventListener("submit", (event) => {
+      event.preventDefault();
+      submits += 1;
+      throw new Error(`search broke on submit ${submits}`);
+    });
+  </script>
+</html>

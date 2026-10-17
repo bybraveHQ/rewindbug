@@ -49,8 +49,15 @@ const describe = (step: Step, words: Phrases, quotes: [string, string]) => {
   const value =
     step.value === undefined ? undefined : escapeMarkdown(step.value);
   switch (step.kind) {
-    case "navigate":
-      return words.open(escapeMarkdown(step.url ?? ""));
+    case "navigate": {
+      const url = escapeMarkdown(step.url ?? "");
+      // a step with from is a navigation inside the page, not one the user typed
+      return step.popstate
+        ? `Go ${step.popstate === "unknown" ? "back or forward" : step.popstate} to ${url}`
+        : step.from
+          ? `The page goes to ${url}`
+          : words.open(url);
+    }
     case "click": {
       if (!target?.name)
         return words.click(escapeMarkdown(target?.css ?? words.element));

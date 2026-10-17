@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <title>Menu</title>
+  <button id="actions" aria-haspopup="menu">Actions</button>
+  <div id="menu" role="menu" hidden>
+    <div role="menuitem">Edit</div>
+    <div role="menuitem">Delete</div>
+  </div>
+  <script type="module">
+    import { init } from "/rewindbug.browser.js";
+    window.started = init({
+      endpoint: `${location.origin}/report${location.search}`,
+    });
+    const menu = document.getElementById("menu");
+    document.getElementById("actions").addEventListener("click", () => {
+      menu.hidden = false;
+    });
+    menu.addEventListener("click", (event) => {
+      if (event.target.textContent === "Delete")
+        throw new Error("delete broke");
+    });
+  </script>
+</html>

@@ -20,6 +20,19 @@ const steps: Step[] = [
   { t: 8, kind: "select", target: target("Country"), value: "ua" },
   { t: 9, kind: "press", key: "Enter" },
   { t: 10, kind: "scroll", x: 0, y: 840 },
+  { t: 11, kind: "navigate", url: "https://app.example/pay", from: "x" },
+  {
+    t: 12,
+    kind: "navigate",
+    url: "https://app.example/cart",
+    popstate: "back",
+  },
+  {
+    t: 13,
+    kind: "navigate",
+    url: "https://app.example/a",
+    popstate: "unknown",
+  },
 ];
 
 describe("stepsMarkdown", () => {
@@ -36,6 +49,9 @@ describe("stepsMarkdown", () => {
         "8. Select “ua” in “Country”",
         "9. Press Enter",
         "10. Scroll to 840",
+        "11. The page goes to https://app.example/pay",
+        "12. Go back to https://app.example/cart",
+        "13. Go back or forward to https://app.example/a",
         "",
         "Error: Oops",
       ].join("\n"),
