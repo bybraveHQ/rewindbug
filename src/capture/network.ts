@@ -34,9 +34,28 @@ type XhrState = {
   ended: NetworkEntry["error"] | undefined;
 };
 
-export const defaultNetworkTrigger = (entry: NetworkEntry): boolean =>
-  (entry.status !== undefined && entry.status >= 500) ||
-  entry.error === "network";
+const IP_HOST = /^(\d+\.){3}\d+$|:/;
+
+// shortcut: one label off the page host stands in for the registrable domain;
+// a public suffix list would cost more than the bundle budget allows
+const sameSite = (host: string, page: string): boolean => {
+  if (host === page) return true;
+  if (IP_HOST.test(page)) return false;
+  const labels = page.split(".");
+  const base = labels.length > 2 ? labels.slice(1).join(".") : page;
+  return host === base || host.endsWith(`.${base}`);
+};
+
+// a server error from any origin is a bug the page saw; a request that never
+// got a response counts only on the page's own site, so a third-party script
+// stopped by an ad blocker or a privacy extension is not one
+export const defaultNetworkTrigger = (entry: NetworkEntry): boolean => {
+  if (entry.status !== undefined && entry.status >= 500) return true;
+  if (entry.error !== "network") return false;
+  const url = resolveUrl(entry.url);
+  const page = globalThis.location?.hostname;
+  return url !== null && page !== undefined && sameSite(url.hostname, page);
+};
 
 const originPath = (url: URL) => url.origin + url.pathname;
 

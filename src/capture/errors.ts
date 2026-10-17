@@ -5,8 +5,10 @@ import { filterUrlsInText, type UrlFilter } from "../shared/url-filter.ts";
 const MAX_MESSAGE_LENGTH = 1000;
 const MAX_STACK_LENGTH = 8000;
 const MAX_NAME_LENGTH = 200;
-const SCRIPT_ERROR = "Script error.";
 const MANUAL = "manual capture";
+// browser noise with no Error object: a cross-origin script error says
+// nothing ("Script error." or empty), a ResizeObserver loop is a benign warning
+const NOISE = /^(Script error\.?|ResizeObserver loop .*)?$/;
 
 const clip = (text: string, max: number, filter: UrlFilter) =>
   filterUrlsInText(text, filter).slice(0, max);
@@ -44,31 +46,36 @@ export const installErrorHandlers = (
   reported: WeakSet<object>,
 ): (() => void) => {
   const onError = (event: Event) => {
-    if (!(event instanceof ErrorEvent)) return;
-    if (event.error !== undefined && event.error !== null) {
-      const error = toTriggerError(event.error, filter);
-      onTrigger({ kind: "error", at: now(), message: error.message, error });
-      return;
+    try {
+      if (!(event instanceof ErrorEvent)) return;
+      if (event.error !== undefined && event.error !== null) {
+        const error = toTriggerError(event.error, filter);
+        onTrigger({ kind: "error", at: now(), message: error.message, error });
+        return;
+      }
+      if (NOISE.test(event.message)) return;
+      const message = clip(event.message, MAX_MESSAGE_LENGTH, filter);
+      onTrigger({ kind: "error", at: now(), message });
+    } catch {
+      // a throwing urlFilter or error getter must not escape into the page
     }
-    const message = clip(
-      event.message || SCRIPT_ERROR,
-      MAX_MESSAGE_LENGTH,
-      filter,
-    );
-    onTrigger({ kind: "error", at: now(), message });
   };
   const onRejection = (event: Event) => {
-    const reason: unknown = (event as PromiseRejectionEvent).reason;
-    // an uncaught failed fetch already became a network trigger
-    if (typeof reason === "object" && reason !== null && reported.has(reason))
-      return;
-    const error = toTriggerError(reason, filter);
-    onTrigger({
-      kind: "unhandledrejection",
-      at: now(),
-      message: error.message,
-      error,
-    });
+    try {
+      const reason: unknown = (event as PromiseRejectionEvent).reason;
+      // an uncaught failed fetch already became a network trigger
+      if (typeof reason === "object" && reason !== null && reported.has(reason))
+        return;
+      const error = toTriggerError(reason, filter);
+      onTrigger({
+        kind: "unhandledrejection",
+        at: now(),
+        message: error.message,
+        error,
+      });
+    } catch {
+      // a throwing urlFilter or error getter must not escape into the page
+    }
   };
   window.addEventListener("error", onError);
   window.addEventListener("unhandledrejection", onRejection);

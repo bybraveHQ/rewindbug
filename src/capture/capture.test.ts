@@ -82,14 +82,50 @@ describe("errors", () => {
     ]);
   });
 
-  test("cross-origin Script error without an object", () => {
+  test("browser noise without an Error object is not a trigger", () => {
     start();
-    window.dispatchEvent(new ErrorEvent("error", { message: "" }));
-    expect(triggers[0]).toEqual({
-      kind: "error",
-      at: NOW,
-      message: "Script error.",
+    for (const message of [
+      "",
+      "Script error.",
+      "Script error",
+      "ResizeObserver loop completed with undelivered notifications.",
+      "ResizeObserver loop limit exceeded",
+    ]) {
+      window.dispatchEvent(new ErrorEvent("error", { message }));
+    }
+    expect(triggers).toEqual([]);
+  });
+
+  test("an error event with a message but no object is a trigger", () => {
+    start();
+    window.dispatchEvent(new ErrorEvent("error", { message: "boom" }));
+    expect(triggers[0]).toEqual({ kind: "error", at: NOW, message: "boom" });
+  });
+
+  test("a throwing urlFilter does not escape the error handlers", () => {
+    start({
+      urlFilter: () => {
+        throw new Error("bad filter");
+      },
     });
+    const errors: unknown[] = [];
+    const onError = (event: Event) => errors.push(event);
+    window.addEventListener("error", onError);
+    try {
+      window.dispatchEvent(
+        new ErrorEvent("error", {
+          error: new Error("see https://a.example/x"),
+        }),
+      );
+      const event = Object.assign(new Event("unhandledrejection"), {
+        reason: new Error("see https://a.example/y"),
+      });
+      window.dispatchEvent(event);
+    } finally {
+      window.removeEventListener("error", onError);
+    }
+    expect(errors).toHaveLength(1);
+    expect(triggers).toEqual([]);
   });
 
   test("unhandled rejection with a non-error value", () => {
@@ -262,21 +298,50 @@ describe("fetch", () => {
   test("network failure triggers, abort does not", async () => {
     start();
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    await expect(fetch("https://api.example/a")).rejects.toThrow(
-      "Failed to fetch",
-    );
+    await expect(fetch("/a")).rejects.toThrow("Failed to fetch");
     fetchMock.mockRejectedValueOnce(new DOMException("aborted", "AbortError"));
-    await expect(fetch("https://api.example/b")).rejects.toThrow("aborted");
+    await expect(fetch("/b")).rejects.toThrow("aborted");
     const network = capture.snapshot().network;
     expect(network.map((e) => e.error)).toEqual(["network", "abort"]);
     expect(triggers).toHaveLength(1);
+  });
+
+  test("a failure counts on the page's site only, a 5xx anywhere", async () => {
+    vi.stubGlobal("location", new URL("https://app.shop.example/cart"));
+    start();
+    const fail = async (url: string) => {
+      fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      await fetch(url).catch(() => undefined);
+    };
+    await fail("https://www.google-analytics.com/collect");
+    await fail("https://api.shop.example/orders");
+    await fail("https://shop.example/x");
+    await fail("https://app.shop.example:8443/x");
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 502 }));
+    await fetch("https://payments.other.example/charge");
+    expect(triggers.map((t) => t.message)).toEqual([
+      "GET /orders → network",
+      "GET /x → network",
+      "GET /x → network",
+      "GET /charge → 502",
+    ]);
+  });
+
+  test("on an IP host a failure counts on that host only", async () => {
+    vi.stubGlobal("location", new URL("http://10.0.0.1:5500/"));
+    start();
+    for (const url of ["http://20.0.0.1/a", "http://10.0.0.1:7000/b"]) {
+      fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      await fetch(url).catch(() => undefined);
+    }
+    expect(triggers.map((t) => t.message)).toEqual(["GET /b → network"]);
   });
 
   test("an uncaught failed fetch does not report twice", async () => {
     start();
     const failure = new TypeError("Failed to fetch");
     fetchMock.mockRejectedValueOnce(failure);
-    await expect(fetch("https://api.example/a")).rejects.toBe(failure);
+    await expect(fetch("/a")).rejects.toBe(failure);
     const rejection = (reason: unknown) =>
       Object.assign(new Event("unhandledrejection"), {
         reason,
@@ -354,7 +419,7 @@ describe("xhr", () => {
     ok.send();
     fake(ok).respond(200);
     const broken = new XMLHttpRequest();
-    broken.open("POST", "https://api.example/save");
+    broken.open("POST", "/save");
     broken.send("{}");
     broken.dispatchEvent(new Event("error"));
     broken.dispatchEvent(new Event("loadend"));
@@ -432,7 +497,7 @@ describe("xhr", () => {
     FakeXhr.failSync = true;
     start();
     const xhr = new XMLHttpRequest();
-    xhr.open("GET", "https://api.example/sync", false);
+    xhr.open("GET", "/sync", false);
     expect(() => xhr.send()).toThrow("offline");
     expect(capture.snapshot().network[0]).toMatchObject({
       state: "failed",
