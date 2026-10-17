@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>bench: canvas animation</title>
+    <script type="module" src="/__variant.js"></script>
+  </head>
+  <body>
+    <button id="burst">Burst</button>
+    <canvas id="c" width="800" height="600"></canvas>
+    <script type="module">
+      const START_PARTICLES = 2000;
+      const BURST_PARTICLES = 1000;
+      const canvas = document.getElementById("c");
+      const ctx = canvas.getContext("2d");
+      const particles = [];
+      const add = (n) => {
+        for (let i = 0; i < n; i++) {
+          particles.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            vx: Math.random() * 4 - 2,
+            vy: Math.random() * 4 - 2,
+          });
+        }
+      };
+      add(START_PARTICLES);
+      const frame = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (const p of particles) {
+          p.x = (p.x + p.vx + canvas.width) % canvas.width;
+          p.y = (p.y + p.vy + canvas.height) % canvas.height;
+          ctx.fillRect(p.x, p.y, 2, 2);
+        }
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+      document
+        .getElementById("burst")
+        .addEventListener("click", () => add(BURST_PARTICLES));
+    </script>
+  </body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>bench: spa screen</title>
+    <script type="module" src="/__variant.js"></script>
+  </head>
+  <body>
+    <nav>
+      <a href="/spa.html?page=1" data-page="1">Page 1</a>
+      <a href="/spa.html?page=2" data-page="2">Page 2</a>
+      <a href="/spa.html?page=3" data-page="3">Page 3</a>
+    </nav>
+    <button id="modal-toggle">Toggle modal</button>
+    <div id="modal" hidden><p>Modal content</p></div>
+    <main id="list"></main>
+    <script type="module">
+      const list = document.getElementById("list");
+      const load = async (page) => {
+        const res = await fetch(`/api/items?page=${page}`);
+        const items = await res.json();
+        list.innerHTML = items
+          .map(
+            (it) =>
+              `<article class="card"><h3>${it.title}</h3><p>${it.body}</p><button>Open</button></article>`,
+          )
+          .join("");
+      };
+      document.querySelector("nav").addEventListener("click", (e) => {
+        const link = e.target.closest("a[data-page]");
+        if (!link) return;
+        e.preventDefault();
+        history.pushState({}, "", link.href);
+        load(link.dataset.page);
+      });
+      window.addEventListener("popstate", () => {
+        load(new URL(location.href).searchParams.get("page") ?? "1");
+      });
+      document.getElementById("modal-toggle").addEventListener("click", () => {
+        const modal = document.getElementById("modal");
+        modal.hidden = !modal.hidden;
+      });
+      load("1");
+    </script>
+  </body>
+</html>

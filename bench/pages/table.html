@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>bench: table 10k</title>
+    <script type="module" src="/__variant.js"></script>
+  </head>
+  <body>
+    <button id="rerender">Rerender</button>
+    <button id="sort">Sort</button>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Name</th>
+          <th>Value</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <script type="module">
+      const ROW_COUNT = 10_000;
+      const rows = document.getElementById("rows");
+      let data = [];
+      const fill = () => {
+        data = Array.from({ length: ROW_COUNT }, (_, i) => ({
+          id: i,
+          name: `Item ${i}`,
+          value: Math.round(Math.random() * 1e6),
+          status: i % 3 === 0 ? "active" : "idle",
+        }));
+      };
+      const render = () => {
+        rows.innerHTML = data
+          .map(
+            (r) =>
+              `<tr class="${r.status}"><td>${r.id}</td><td>${r.name}</td><td>${r.value}</td><td>${r.status}</td></tr>`,
+          )
+          .join("");
+      };
+      fill();
+      render();
+      document.getElementById("rerender").addEventListener("click", () => {
+        fill();
+        render();
+      });
+      document.getElementById("sort").addEventListener("click", () => {
+        data.sort((a, b) => a.value - b.value);
+        render();
+      });
+    </script>
+  </body>
+</html>

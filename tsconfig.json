@@ -13,6 +13,6 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "demo", "e2e", "*.config.ts"],
+  "include": ["src", "bench", "demo", "e2e", "*.config.ts"],
   "exclude": ["demo/sw.ts"]
 }
