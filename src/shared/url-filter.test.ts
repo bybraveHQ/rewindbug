@@ -65,6 +65,19 @@ describe("filterUrlsInText", () => {
     );
   });
 
+  test("parentheses inside a url do not hide its query", () => {
+    expect(
+      filterUrlsInText(
+        "GET https://a.com/files/(1)/x?token=S failed",
+        defaultUrlFilter,
+      ),
+    ).toBe("GET https://a.com/files/(1)/x?token=* failed");
+    // a parenthesis the url did not open stays outside, as in a css url()
+    expect(
+      filterUrlsInText("url(https://a.com/i.png?sig=S)", defaultUrlFilter),
+    ).toBe("url(https://a.com/i.png?sig=*)");
+  });
+
   test("stops a url at quotes", () => {
     const text = '{"url":"https://a.com/?jwt=x"}';
     expect(filterUrlsInText(text, defaultUrlFilter)).toBe(

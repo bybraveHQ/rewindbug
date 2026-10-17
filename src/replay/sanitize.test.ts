@@ -109,6 +109,41 @@ describe("urls in the recorded DOM", () => {
     expect(text).toContain("/p.png?sig=*");
   });
 
+  it("filters style objects, css rules and text", () => {
+    const styleChange: RecordedEvent = {
+      type: 3,
+      timestamp: 1,
+      data: {
+        source: 0,
+        adds: [
+          {
+            parentId: 1,
+            node: { type: 3, textContent: `.a { background: url(${page}) }` },
+          },
+        ],
+        attributes: [
+          { id: 2, attributes: { style: { background: `url(${page})` } } },
+        ],
+        texts: [{ id: 3, value: `see ${page}` }],
+        removes: [],
+      },
+    };
+    const rule: RecordedEvent = {
+      type: 3,
+      timestamp: 1,
+      data: {
+        source: 8,
+        id: 4,
+        adds: [{ rule: `.b { background: url(${page}) }`, index: 0 }],
+      },
+    };
+    sanitizeEvent(styleChange, defaultUrlFilter);
+    sanitizeEvent(rule, defaultUrlFilter);
+    const text = JSON.stringify([styleChange, rule]);
+    expect(text).not.toContain("token=S");
+    expect(text.match(/token=\*/g)).toHaveLength(4);
+  });
+
   it("filters url attributes in added nodes and attribute changes", () => {
     const event: RecordedEvent = {
       type: 3,

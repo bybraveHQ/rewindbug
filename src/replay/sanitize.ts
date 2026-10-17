@@ -20,11 +20,13 @@ const URL_ATTRIBUTES = new Set([
 // text with absolute urls inside: a source list, inline css with url(...)
 const URLS_IN_TEXT_ATTRIBUTES = new Set(["srcset", "style", "_cssText"]);
 const MUTATION_SOURCE = 0;
+const STYLE_SHEET_RULE_SOURCE = 8;
 const MAX_URL_LENGTH = 2000;
 
 type MetaData = { href?: unknown };
 type SerializedNode = {
   attributes?: Record<string, unknown>;
+  textContent?: unknown;
   childNodes?: unknown[];
 };
 
@@ -35,6 +37,14 @@ const filterAttributes = (
   if (!attributes) return;
   for (const name in attributes) {
     const value = attributes[name];
+    // a style change comes as an object of properties
+    if (name === "style" && value && typeof value === "object") {
+      const style = value as Record<string, unknown>;
+      for (const property in style)
+        if (typeof style[property] === "string")
+          style[property] = filterUrlsInText(style[property] as string, filter);
+      continue;
+    }
     if (typeof value !== "string") continue;
     if (URL_ATTRIBUTES.has(name)) attributes[name] = filter(value);
     else if (URLS_IN_TEXT_ATTRIBUTES.has(name))
@@ -49,6 +59,9 @@ const filterTree = (root: unknown, filter: UrlFilter): void => {
     const node = stack.pop() as SerializedNode | undefined;
     if (!node || typeof node !== "object") continue;
     filterAttributes(node.attributes, filter);
+    // text, including the css inside a <style>
+    if (typeof node.textContent === "string")
+      node.textContent = filterUrlsInText(node.textContent, filter);
     if (Array.isArray(node.childNodes)) stack.push(...node.childNodes);
   }
 };
@@ -71,6 +84,15 @@ export const sanitizeEvent = (
   }
   if (event.type === INCREMENTAL) {
     const data = event.data as MutationData | undefined;
+    // rules a css-in-js library inserts through the CSSOM
+    if (data?.source === STYLE_SHEET_RULE_SOURCE) {
+      for (const add of data.adds ?? []) {
+        const rule = add as { rule?: unknown } | undefined;
+        if (rule && typeof rule.rule === "string")
+          rule.rule = filterUrlsInText(rule.rule, filter);
+      }
+      return;
+    }
     if (data?.source !== MUTATION_SOURCE) return;
     for (const add of data.adds ?? [])
       filterTree((add as { node?: unknown } | undefined)?.node, filter);
@@ -80,6 +102,11 @@ export const sanitizeEvent = (
           ?.attributes,
         filter,
       );
+    for (const change of data.texts ?? []) {
+      const text = change as { value?: unknown } | undefined;
+      if (text && typeof text.value === "string")
+        text.value = filterUrlsInText(text.value, filter);
+    }
     return;
   }
   if (event.type !== META) return;
