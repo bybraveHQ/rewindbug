@@ -99,15 +99,23 @@ const fieldValue = (field: HTMLElement): string =>
     ? field.value
     : (field.textContent ?? "");
 
-// a field a "show password" button turned into text: its type when it got
-// focus, rrweb's mark, or its autocomplete still say what it is
+// a field a "show password" button turned into text, or swapped for a new
+// one: its type when it got focus, rrweb's mark, its autocomplete, name or
+// id still say what it is
 const isPassword = (field: Element): boolean =>
   (field as HTMLInputElement).type === "password" ||
   field.hasAttribute("data-rr-is-password") ||
-  /password/i.test(field.getAttribute("autocomplete") ?? "");
+  /pass|pwd/i.test(
+    `${field.getAttribute("autocomplete")} ${field.getAttribute("name")} ${field.id}`,
+  );
 
-const asElement = (target: EventTarget | null): Element | undefined =>
-  target instanceof Element ? target : undefined;
+// the element itself inside an open shadow root, where event.target is the
+// host; Playwright's locators reach into open shadow roots too
+// composedPath is never empty while the event is dispatched
+const asElement = (event: Event): Element | undefined => {
+  const target = event.composedPath()[0];
+  return target instanceof Element ? target : undefined;
+};
 
 export const startSteps = (options: StepsOptions): Steps => {
   const now = options.now ?? Date.now;
@@ -161,7 +169,7 @@ export const startSteps = (options: StepsOptions): Steps => {
   };
 
   const onClick = guard((event: MouseEvent) => {
-    const origin = asElement(event.target);
+    const origin = asElement(event);
     if (!origin) return;
     const element = origin.closest(CLICK_TARGET) ?? origin;
     const t = now();
@@ -199,7 +207,7 @@ export const startSteps = (options: StepsOptions): Steps => {
   });
 
   const onInput = guard((event: Event) => {
-    const origin = asElement(event.target);
+    const origin = asElement(event);
     const field = origin && fillField(origin);
     if (!field) return;
     // a password stays masked after a "show password" toggle
@@ -235,7 +243,7 @@ export const startSteps = (options: StepsOptions): Steps => {
   });
 
   const onChange = guard((event: Event) => {
-    const element = asElement(event.target);
+    const element = asElement(event);
     if (!element) return;
     if (isCheckable(element)) {
       push({
@@ -257,13 +265,13 @@ export const startSteps = (options: StepsOptions): Steps => {
   });
 
   const onFocus = guard((event: FocusEvent) => {
-    const field = asElement(event.target);
+    const field = asElement(event);
     if (field && isPassword(field)) passwords.add(field as HTMLElement);
   });
 
   const onKeydown = guard((event: KeyboardEvent) => {
     if (!KEYS.has(event.key)) return;
-    const element = asElement(event.target);
+    const element = asElement(event);
     if (event.key === "Enter" && element) enter = { element, t: now() };
     push({
       t: now(),
@@ -282,7 +290,7 @@ export const startSteps = (options: StepsOptions): Steps => {
   };
 
   const onScroll = guard((event: Event) => {
-    const element = asElement(event.target);
+    const element = asElement(event);
     // a text field scrolls its own content while typing
     if (
       element instanceof HTMLInputElement ||

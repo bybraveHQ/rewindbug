@@ -49,6 +49,43 @@ describe("steps", () => {
     ]);
   });
 
+  it("records typing and clicks inside an open shadow root", async () => {
+    document.body.innerHTML = "<promo-box></promo-box>";
+    const root = $("promo-box").attachShadow({ mode: "open" });
+    root.innerHTML =
+      '<label>Promo <input id="code" data-rb-unmask></label><button>Apply promo</button><label>Pin <input id="pin" type="password"></label>';
+    const s = start();
+    const field = root.querySelector("#code");
+    const pin = root.querySelector("#pin");
+    const button = root.querySelector("button");
+    if (!field || !pin || !button) throw new Error("no shadow content");
+    await userEvent.type(field, "BAD");
+    await userEvent.type(pin, "1234");
+    await userEvent.click(button);
+    const got = recorded(s);
+    expect(got).toEqual([
+      expect.objectContaining({
+        kind: "fill",
+        value: "BAD",
+        target: expect.objectContaining({ role: "textbox", name: "Promo" }),
+      }),
+      expect.objectContaining({
+        kind: "fill",
+        masked: true,
+        target: expect.objectContaining({ name: "Pin", label: true }),
+      }),
+      expect.objectContaining({
+        kind: "click",
+        target: expect.objectContaining({
+          role: "button",
+          name: "Apply promo",
+        }),
+      }),
+    ]);
+    // a password stays masked inside a shadow root too
+    expect(JSON.stringify(got)).not.toContain("1234");
+  });
+
   it("records a click on the nearest interactive ancestor", async () => {
     document.body.innerHTML =
       '<button data-testid="pay"><span>Pay now</span></button>';
@@ -135,6 +172,28 @@ describe("steps", () => {
       expect.objectContaining({ kind: "fill", masked: true }),
       expect.objectContaining({ kind: "fill", masked: true }),
     ]);
+  });
+
+  it("data-rb-unmask keeps a field masked when its name or id says password", async () => {
+    // a "show password" toggle that swaps the input for a new text one
+    document.body.innerHTML = `
+      <form data-rb-unmask>
+        <input type="text" name="password" aria-label="Shown">
+        <input type="text" id="user-pwd" aria-label="Other">
+        <input type="text" name="promo" aria-label="Promo">
+      </form>
+    `;
+    const s = start();
+    await userEvent.type($('[name="password"]'), "hunter2");
+    await userEvent.type($("#user-pwd"), "swordfish");
+    await userEvent.type($('[name="promo"]'), "SAVE10");
+    const got = recorded(s);
+    expect(got).toEqual([
+      expect.objectContaining({ kind: "fill", masked: true }),
+      expect.objectContaining({ kind: "fill", masked: true }),
+      expect.objectContaining({ kind: "fill", value: "SAVE10" }),
+    ]);
+    expect(JSON.stringify(got)).not.toMatch(/hunter2|swordfish/);
   });
 
   it("Enter is one press step, not a press and the click it makes", async () => {

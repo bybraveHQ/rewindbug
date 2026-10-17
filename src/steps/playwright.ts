@@ -35,6 +35,11 @@ const SAMPLES: Record<string, string> = {
   range: "50",
 };
 const SAMPLE_TEXT = "test";
+// an error later than this after the last step came from async work: the
+// test waits as long, plus SETTLE_MS for a slower run, before it checks
+const ASYNC_MS = 50;
+const SETTLE_MS = 1000;
+const MAX_WAIT_MS = 10_000;
 const PASSWORD = 'process.env.TEST_PASSWORD ?? "password"';
 
 // U+2028 and U+2029 stay raw in JSON and break the line in older tools
@@ -135,7 +140,7 @@ const action = (
   const where = locator(step.target);
   if (where === null)
     return [
-      `// ${step.kind} on ${line(step.target?.css ?? "")}: several elements match, pick the right one`,
+      `// ${step.kind} on ${line(step.target?.css ?? "")}: several match, pick one`,
     ];
   const on = where ?? 'page.locator("body")';
   const at = (n: number | undefined) => (Number.isFinite(n) ? Number(n) : 0);
@@ -148,9 +153,7 @@ const action = (
         step.t - previous.t <= FOLLOW_MS;
       if (step.popstate && !acted)
         return step.popstate === "unknown"
-          ? [
-              `// back or forward to ${line(url)}: the browser did not say which`,
-            ]
+          ? [`// back or forward to ${line(url)}: direction unknown`]
           : [
               `// ${step.popstate} to ${line(url)}`,
               `await page.${step.popstate === "back" ? "goBack" : "goForward"}();`,
@@ -177,7 +180,7 @@ const action = (
     case "select":
       return step.masked || step.value === undefined
         ? [
-            "// masked: the report does not say which option was chosen",
+            "// masked: the chosen option is unknown",
             `await ${on}.selectOption({ index: 1 });`,
           ]
         : [`await ${on}.selectOption(${str(step.value)});`];
@@ -252,12 +255,12 @@ export const playwrightTest = (source: TestSource): string => {
   });
 
   const body: string[] = [
-    "// baseURL from playwright.config, else the report's origin; a login needs storageState",
+    "// baseURL from the config, else the report's origin; log in via storageState",
     `const at = (path: string) => new URL(path, baseURL ?? ${str(origin(range.startUrl))}).href;`,
   ];
   if (inputs.size > 0)
     body.push(
-      "// typed values are masked in the report: put your test data here",
+      "// masked: put your test data here",
       "const input = {",
       ...[...inputs].map(([key, value]) => `${INDENT}${str(key)}: ${value},`),
       "};",
@@ -296,12 +299,26 @@ export const playwrightTest = (source: TestSource): string => {
   }
 
   if (failing && !linked) body.push(ASSERT_RESPONSE);
+  // a render after a route change or a handler after a request fails later
+  // than the step: the check waits for it, by the delay in the report
+  const last = steps.at(-1);
+  // steps end at the trigger, so the gap is never negative
+  const gap = last ? trigger.at - last.t : 0;
+  if (
+    last &&
+    trigger.kind !== "network" &&
+    (logged || trigger.kind !== "manual") &&
+    (last.kind === "navigate" || gap > ASYNC_MS)
+  )
+    body.push(
+      `await page.waitForTimeout(${Math.min(MAX_WAIT_MS, gap + SETTLE_MS)});`,
+    );
   if (logged)
     body.push(
       `expect((await Promise.all(logged)).filter((text) => text.includes(${str(trigger.message)}))).toEqual([]);`,
     );
   else if (trigger.kind === "manual")
-    body.push("// manual capture: add the assertion that failed");
+    body.push("// add the assertion that failed");
   else if (trigger.kind !== "network") body.push("expect(errors).toEqual([]);");
 
   const title =

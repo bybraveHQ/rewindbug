@@ -39,6 +39,8 @@ const body = (input: TestSource): string[] =>
         text !== "});" &&
         !text.includes("errors") &&
         !text.startsWith("// baseURL from") &&
+        // the wait before the check has a test of its own
+        !text.startsWith("await page.waitForTimeout(") &&
         !text.startsWith("const at ="),
     );
 
@@ -123,7 +125,7 @@ describe("playwrightTest", () => {
       'await page.getByTestId("row").nth(0).click();',
       'await page.locator("main > button:nth-of-type(2)").click();',
       'await page.locator("main > button:nth-of-type(2)").nth(1).click();',
-      "// click on main > button:nth-of-type(2): several elements match, pick the right one",
+      "// click on main > button:nth-of-type(2): several match, pick one",
     ]);
   });
 
@@ -217,7 +219,7 @@ describe("playwrightTest", () => {
       'await page.getByRole("checkbox", { name: "Terms", exact: true }).check();',
       'await page.getByRole("checkbox", { name: "News", exact: true }).uncheck();',
       'await page.getByRole("combobox", { name: "Country", exact: true }).selectOption("ua");',
-      "// masked: the report does not say which option was chosen",
+      "// masked: the chosen option is unknown",
       'await page.getByRole("combobox", { name: "Card", exact: true }).selectOption({ index: 1 });',
       'await page.getByRole("textbox", { name: "Email", exact: true }).press("Enter");',
       'await page.keyboard.press("Escape");',
@@ -246,7 +248,7 @@ describe("playwrightTest", () => {
       ]),
     );
     expect(lines.slice(0, lines.indexOf(GOTO))).toEqual([
-      "// typed values are masked in the report: put your test data here",
+      "// masked: put your test data here",
       "const input = {",
       '"Email": "user@example.com",',
       '"Qty": "1",',
@@ -310,7 +312,7 @@ describe("playwrightTest", () => {
       "await page.goBack();",
       `// forward to ${START}`,
       "await page.goForward();",
-      `// back or forward to ${LIST}: the browser did not say which`,
+      `// back or forward to ${LIST}: direction unknown`,
       'await page.getByTestId("back").click();',
       `// the page navigates to ${START}`,
       'await page.waitForURL((url) => url.pathname === "/cart");',
@@ -398,10 +400,40 @@ describe("playwrightTest", () => {
     );
     expect(consoleCode).toContain("expect(errors).toEqual([]);");
     const manual = forKind("manual");
-    expect(manual).toContain(
-      "// manual capture: add the assertion that failed",
-    );
+    expect(manual).toContain("// add the assertion that failed");
     expect(manual).not.toContain("errors");
+  });
+
+  test("waits as long as the report says before the final check", () => {
+    const click: Step = {
+      t: 10,
+      kind: "click",
+      target: target({ testId: "go" }),
+    };
+    const route: Step = { t: 10, kind: "navigate", url: LIST, from: START };
+    const at = (trigger: Trigger, steps: Step[]) =>
+      playwrightTest(source(steps, { trigger }))
+        .split("\n")
+        .map((text) => text.trim())
+        .filter((text) => text.includes("waitForTimeout"));
+    // a synchronous handler throws inside the click: no wait
+    expect(at({ ...error, at: 11 }, [click])).toEqual([]);
+    // an error 400 ms after the click came from async work
+    expect(at({ ...error, at: 410 }, [click])).toEqual([
+      "await page.waitForTimeout(1400);",
+    ]);
+    // a render after a route change, even 3 ms later
+    expect(at({ ...error, at: 13 }, [route])).toEqual([
+      "await page.waitForTimeout(1003);",
+    ]);
+    // capped, and never for a network trigger or an unlogged capture()
+    expect(at({ ...error, at: 60_000 }, [click])).toEqual([
+      "await page.waitForTimeout(10000);",
+    ]);
+    expect(
+      at({ kind: "network", at: 410, message: "GET /a → 500" }, [click]),
+    ).toEqual([]);
+    expect(at({ kind: "manual", at: 410, message: "m" }, [click])).toEqual([]);
   });
 
   test("a captured error the page also logged fails the test while logged", () => {
@@ -428,7 +460,7 @@ describe("playwrightTest", () => {
     expect(logged).toContain(
       'expect((await Promise.all(logged)).filter((text) => text.includes("Cannot read name"))).toEqual([]);',
     );
-    expect(logged).not.toContain("manual capture: add the assertion");
+    expect(logged).not.toContain("add the assertion that failed");
 
     // not logged, or logged at another level, or no error object: a comment
     for (const extra of [
@@ -451,9 +483,7 @@ describe("playwrightTest", () => {
       },
     ]) {
       const code = playwrightTest(source([], extra));
-      expect(code).toContain(
-        "// manual capture: add the assertion that failed",
-      );
+      expect(code).toContain("// add the assertion that failed");
       expect(code).not.toContain("logged");
     }
   });
