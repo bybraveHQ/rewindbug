@@ -26,9 +26,9 @@ and the test, unedited:
 import { test, expect } from "@playwright/test";
 
 test("Cannot read properties of undefined (reading 'percent')", async ({ page, baseURL }) => {
-  // baseURL from playwright.config, else the report's origin; a login needs storageState
+  // baseURL from the config, else the report's origin; log in via storageState
   const at = (path: string) => new URL(path, baseURL ?? "http://127.0.0.1:4789").href;
-  // typed values are masked in the report: put your test data here
+  // masked: put your test data here
   const input = {
     "Name": "test",
   };
@@ -64,7 +64,7 @@ The page keeps a rolling buffer in memory and sends nothing until a trigger: an 
 - **console**: up to 200 `console.log`, `info`, `warn`, `error` and `debug` calls; **network**: up to 200 `fetch` and `XMLHttpRequest` calls with status and timing. When a buffer overflowed inside the window, `limits.truncated` names it;
 - **context**: URL, referrer, title, viewport, user agent, language, time zone, your release and tags.
 
-Limits of the steps and the test: they start where the buffer starts, so a login or an open dialog from before it is not restored; a full page load in a multi-page app clears the buffer; clicks inside an iframe, drag, right clicks and keys other than Enter, Escape and Tab are not steps, and a click inside shadow DOM is a step on its host element; a test from `capture()` has no assertion, only a comment where to put it. Stacks are not mapped through source maps.
+Limits of the steps and the test: they start where the buffer starts, so a login or an open dialog from before it is not restored; a full page load in a multi-page app clears the buffer; clicks inside an iframe, drag, right clicks and keys other than Enter, Escape and Tab are not steps, typing and clicks inside an open shadow root are steps on the element itself, inside a closed one on its host; a test from `capture(error)` checks that the error is no longer logged when the page logged it before the call, and otherwise has only a comment where to put the assertion; the test waits before its check as long as the error took after the last step. Stacks are not mapped through source maps.
 
 ## Install
 
@@ -105,8 +105,10 @@ rewindbug sees uncaught errors and rejected promises. An error your framework ca
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | React                | an error boundary's `componentDidCatch`, or `onError` of `react-error-boundary`                                                    |
 | Next.js (App Router) | `useEffect(() => capture(error), [error])` in `app/error.tsx`; `init` in `instrumentation-client.ts` (15.3+) or a client component |
-| Vue                  | `app.config.errorHandler = (error) => capture(error)`                                                                              |
-| Angular              | `handleError(error) { capture(error); }` in your `ErrorHandler`                                                                    |
+| Vue                  | `app.config.errorHandler = (error) => { console.error(error); capture(error); }`                                                   |
+| Angular              | `handleError(error) { console.error(error); capture(error); }` in your `ErrorHandler`                                              |
+
+Log the error before `capture`, as in the Vue and Angular lines: their handlers replace the framework's own logging, and the test rewindbug generates for such a report fails while that error is logged. React logs a caught error itself.
 
 Your own end-to-end tests load the page too, and every failing run would send a report, the regression tests rewindbug generates included. Playwright, Selenium and other WebDriver tools set `navigator.webdriver`, so skip `init` there:
 
@@ -226,20 +228,22 @@ The schema is version `0` and may still change between minor versions of the pac
 
 ## Privacy
 
-| Data                                                                       | Default                                                                                                                                                                                                                |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| typed values in inputs, textareas, selects                                 | masked in the recording, the steps and the test (`maskInputs`), except fields under `data-rb-unmask`; passwords always                                                                                                 |
-| hidden inputs (`type="hidden"`)                                            | never recorded: CSRF and session tokens live there                                                                                                                                                                     |
-| page text, button and link names, `title`                                  | **kept**: the steps need them. Mask parts of the page with `maskSelector`                                                                                                                                              |
-| console messages, error messages and stacks                                | **kept as is**: `console.log(user)` puts the user into the report. Only URLs inside them pass `urlFilter`. Redact or drop them in `beforeSend`: the console is in `report.console` and again in `report.replay.events` |
-| request and response bodies                                                | not collected unless the URL is in `bodyAllowlist`                                                                                                                                                                     |
-| bodies of allowlisted URLs                                                 | **kept as is, unmasked**: allowlist only endpoints without secrets and personal data, not a whole API origin with `/login` in it                                                                                       |
-| query parameters named like secrets                                        | value replaced with `*` by the default filter (below)                                                                                                                                                                  |
-| other query parameters, ids and classes in selectors                       | **kept**                                                                                                                                                                                                               |
-| attributes in the recording (`data-*`, `aria-label`, `placeholder`, `alt`) | **kept**: `maskSelector` masks text only; `rb-block` leaves a whole block out of the recording                                                                                                                         |
-| login and password in URLs (`user:pass@`)                                  | removed by the default filter                                                                                                                                                                                          |
-| `#…` fragments containing `=`                                              | removed by the default filter                                                                                                                                                                                          |
-| cookies, request headers, `localStorage`                                   | never collected                                                                                                                                                                                                        |
+| Data                                                                       | Default                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| typed values in inputs, textareas, selects                                 | masked in the recording, the steps and the test (`maskInputs`), except fields under `data-rb-unmask`; passwords always, see below                                                                                                            |
+| hidden inputs (`type="hidden"`)                                            | never recorded: CSRF and session tokens live there                                                                                                                                                                                           |
+| page text, button and link names, `title`                                  | **kept**: the steps need them. Mask parts of the page with `maskSelector`                                                                                                                                                                    |
+| console messages, error messages and stacks                                | **kept as is**: `console.log(user)` puts the user into the report. Only `http(s)` and `ws(s)` URLs inside them pass `urlFilter`. Redact or drop them in `beforeSend`: the console is in `report.console` and again in `report.replay.events` |
+| request and response bodies                                                | not collected unless the URL is in `bodyAllowlist`                                                                                                                                                                                           |
+| bodies of allowlisted URLs                                                 | **kept as is, unmasked**: allowlist only endpoints without secrets and personal data, not a whole API origin with `/login` in it                                                                                                             |
+| query parameters named like secrets                                        | value replaced with `*` by the default filter (below)                                                                                                                                                                                        |
+| other query parameters, ids and classes in selectors                       | **kept**                                                                                                                                                                                                                                     |
+| attributes in the recording (`data-*`, `aria-label`, `placeholder`, `alt`) | **kept**: `maskSelector` masks text only; `rb-block` leaves a whole block out of the recording                                                                                                                                               |
+| login and password in URLs (`user:pass@`)                                  | removed by the default filter                                                                                                                                                                                                                |
+| `#…` fragments containing `=`                                              | removed by the default filter                                                                                                                                                                                                                |
+| cookies, request headers, `localStorage`                                   | never collected                                                                                                                                                                                                                              |
+
+A field counts as a password when it is or was `type="password"` when it got focus, when rrweb saw a "show password" toggle change it, or when its `autocomplete`, `name` or `id` contains `pass` or `pwd`. A field that matches none of these is recorded as typed under `data-rb-unmask` or with `maskInputs: false`, so give a custom password field one of them.
 
 The default filter masks a query parameter when its whole name is one of `token`, `key`, `secret`, `pass`, `password`, `auth`, `session`, `code`, `sig`, `signature`, `jwt`, `otp`, optionally after a prefix that ends in `_` or `-`: `api_key` and `x-auth` are masked, `apiKey`, `accessToken` and `authorization` are not. Cover those with your own `urlFilter`.
 
@@ -266,7 +270,7 @@ Measured with `pnpm bench` in a clone of this repo (`pnpm bench -- --report` for
 
 | What                        | Measured                                                                                                                                                                                           |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| bundle, core without rrweb  | 13.5 kB gzip (`size-limit`, budget 14 kB, checked in CI)                                                                                                                                           |
+| bundle, core without rrweb  | 14.0 kB gzip (`size-limit`, budget 15 kB, checked in CI)                                                                                                                                           |
 | bundle with `@rrweb/record` | about 35 kB gzip: `dist/rewindbug.browser.js` (`size-limit` reports 35.3 kB), budget 40 kB, checked in CI                                                                                          |
 | rewindbug on top of rrweb   | no measurable INP or TBT and under 0.2 MB of heap on the canvas, form and SPA pages; the table page is over the element limit and records nothing                                                  |
 | rrweb recording itself      | about 16 ms of INP at 4× slowdown on an interaction that re-renders much of the DOM, so about 4–5 ms on a regular CPU; 1–3 MB of heap                                                              |
@@ -285,7 +289,7 @@ One page load sends at most 10 reports, `capture()` included. The same error is 
 | Gecko: Firefox                                                                                | 113                    |
 | WebKit: Safari, every browser on iOS                                                          | 16.4                   |
 
-The minimums come from compatibility data and are not tested; CI runs the latest Chromium, Firefox and WebKit. On an engine that parses the bundle but lacks `CompressionStream` or another required API, `init` returns `false` silently. Below the minimum the bundle may fail to parse. If such clients matter to you, load the package with a dynamic `import()` inside `try`, in a chunk of its own.
+The minimums come from compatibility data. Before the 0.1.0 release the browser build was run by hand on Firefox 113 and WebKit 16.4, and on Chromium 97, the oldest build Playwright ships for Apple silicon: it started, recorded and sent reports with steps and a test. CI runs the latest Chromium, Firefox and WebKit. On an engine that parses the bundle but lacks `CompressionStream` or another required API, `init` returns `false` silently. Below the minimum the bundle may fail to parse. If such clients matter to you, load the package with a dynamic `import()` inside `try`, in a chunk of its own.
 
 ## Status
 
