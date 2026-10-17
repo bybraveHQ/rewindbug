@@ -22,7 +22,7 @@ export type ReplayState =
 export type ReplayOptions = {
   bufferSeconds: number;
   maskInputs: boolean;
-  maskText: string;
+  maskSelector: string;
   filter: UrlFilter;
 };
 
@@ -188,7 +188,7 @@ export const startReplay = (options: ReplayOptions): Replay => {
   const begin = () => {
     cancelPending = undefined;
     if (state !== "not-started") return;
-    if (!validSelector(options.maskText)) {
+    if (!validSelector(options.maskSelector)) {
       // an invalid selector would silently disable text masking in rrweb
       state = "stopped";
       return;
@@ -211,8 +211,23 @@ export const startReplay = (options: ReplayOptions): Replay => {
       stopFn = record({
         emit,
         maskAllInputs: options.maskInputs,
-        ...(options.maskText ? { maskTextSelector: options.maskText } : {}),
+        // same rule as the steps: data-rb-unmask shows a value unless it is a
+        // password (also one a "show password" button turned into text, which
+        // rrweb marks) or sits under maskSelector
+        maskInputFn: (text, element) =>
+          element.closest("[data-rb-unmask]") &&
+          (element as HTMLInputElement).type !== "password" &&
+          !element.hasAttribute("data-rr-is-password") &&
+          !/password/i.test(element.getAttribute("autocomplete") ?? "") &&
+          !(options.maskSelector && element.closest(options.maskSelector))
+            ? text
+            : "*".repeat(text.length),
+        ...(options.maskSelector
+          ? { maskTextSelector: options.maskSelector }
+          : {}),
         blockClass: "rb-block",
+        // hidden inputs carry CSRF and session tokens, never anything typed
+        blockSelector: "input[type=hidden i]",
         slimDOMOptions: "all",
         sampling: { mousemove: 50, scroll: 150, input: "last" },
         inlineStylesheet: false,

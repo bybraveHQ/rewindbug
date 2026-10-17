@@ -1,5 +1,6 @@
 import { record } from "@rrweb/record";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { userEvent } from "vitest/browser";
 import { startCapture, type Capture } from "../capture/index.ts";
 import { defaultUrlFilter } from "../shared/url-filter.ts";
 import { startReplay, type Replay } from "./index.ts";
@@ -22,12 +23,16 @@ let replay: Replay | undefined;
 let capture: Capture | undefined;
 
 const start = (
-  overrides: { maskText?: string; bufferSeconds?: number } = {},
+  overrides: {
+    maskSelector?: string;
+    bufferSeconds?: number;
+    maskInputs?: boolean;
+  } = {},
 ) => {
   replay = startReplay({
     bufferSeconds: overrides.bufferSeconds ?? 30,
-    maskInputs: true,
-    maskText: overrides.maskText ?? "",
+    maskInputs: overrides.maskInputs ?? true,
+    maskSelector: overrides.maskSelector ?? "",
     filter: defaultUrlFilter,
   });
   return replay;
@@ -95,18 +100,71 @@ describe("replay", () => {
     expect(JSON.stringify(events(r))).not.toContain("secret-value");
   });
 
-  it("masks text under maskText", async () => {
+  it("never records hidden inputs, even with maskInputs off", async () => {
+    document.body.innerHTML =
+      '<form><input type="hidden" name="csrf" value="CSRF-AT-LOAD"></form>';
+    const r = start({ maskInputs: false });
+    await recording(r);
+    const later = document.createElement("input");
+    later.type = "HIDDEN";
+    later.setAttribute("value", "CSRF-ADDED");
+    document.body.append(later);
+    const first = document.querySelector("input");
+    if (first) first.value = "CSRF-SET";
+    document.body.append(document.createElement("section"));
+    await until(() => events(r).some((e) => e.type === 3));
+    const recorded = JSON.stringify(events(r));
+    expect(recorded).not.toContain("CSRF-AT-LOAD");
+    expect(recorded).not.toContain("CSRF-ADDED");
+    expect(recorded).not.toContain("CSRF-SET");
+  });
+
+  it("data-rb-unmask shows a value, never a password", async () => {
+    document.body.innerHTML = `
+      <input data-rb-unmask value="WELCOME10">
+      <input data-rb-unmask type="password" value="hunter2">
+      <input value="private-note">
+    `;
+    const r = start();
+    await recording(r);
+    const recorded = JSON.stringify(events(r));
+    expect(recorded).toContain("WELCOME10");
+    expect(recorded).not.toContain("hunter2");
+    expect(recorded).not.toContain("private-note");
+  });
+
+  it("data-rb-unmask keeps a revealed password masked", async () => {
+    document.body.innerHTML = `
+      <form data-rb-unmask>
+        <input type="password">
+        <input autocomplete="new-password">
+      </form>
+    `;
+    const r = start();
+    await recording(r);
+    const [shown, typed] = [...document.querySelectorAll("input")];
+    if (!shown || !typed) throw new Error("no inputs");
+    shown.type = "text";
+    await userEvent.type(shown, "hunter2");
+    await userEvent.type(typed, "swordfish");
+    await until(() => events(r).some((e) => e.type === 3));
+    const recorded = JSON.stringify(events(r));
+    expect(recorded).not.toContain("hunter2");
+    expect(recorded).not.toContain("swordfish");
+  });
+
+  it("masks text under maskSelector", async () => {
     const p = document.createElement("p");
     p.className = "pii";
     p.textContent = "Jane Roe";
     document.body.append(p);
-    const r = start({ maskText: ".pii" });
+    const r = start({ maskSelector: ".pii" });
     await recording(r);
     expect(JSON.stringify(events(r))).not.toContain("Jane Roe");
   });
 
-  it("does not record with an invalid maskText selector", async () => {
-    const r = start({ maskText: "p[" });
+  it("does not record with an invalid maskSelector selector", async () => {
+    const r = start({ maskSelector: "p[" });
     await until(() => r.snapshot(Infinity).state !== "not-started");
     expect(r.snapshot(Infinity)).toMatchObject({
       state: "stopped",
@@ -152,7 +210,7 @@ describe("replay with capture", () => {
   });
 
   it("writes console entries through the capture serializer", async () => {
-    const r = start({ maskText: ".pii" });
+    const r = start({ maskSelector: ".pii" });
     capture = startCapture(
       { endpoint: "https://sink.test/r", onConsoleEntry: r.emitConsole },
       () => undefined,
