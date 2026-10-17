@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 — 2026-10-18
+
+### rewindbug-mcp
+
+- README on npm: badges, how the server relates to rewindbug and why it is a separate package, support links. No code changes.
+
 ## 0.1.0 — 2026-10-17
 
 First working release. `0.0.1` was a name placeholder.

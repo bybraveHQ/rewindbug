@@ -1,8 +1,14 @@
 # rewindbug-mcp
 
+[![CI](https://github.com/bybraveHQ/rewindbug/actions/workflows/ci.yml/badge.svg)](https://github.com/bybraveHQ/rewindbug/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/rewindbug-mcp)](https://www.npmjs.com/package/rewindbug-mcp)
+[![license](https://img.shields.io/npm/l/rewindbug-mcp)](https://github.com/bybraveHQ/rewindbug/blob/main/LICENSE)
+
 MCP server for [rewindbug](https://github.com/bybraveHQ/rewindbug#readme). It receives bug reports on localhost and hands the last bug to your coding agent in Claude Code or Cursor: trigger, reproduction steps, console, network and a Playwright test, without the heavy rrweb recording.
 
 Your app sends a report on an error, the server stores it, and you ask the agent "look at the last bug".
+
+It is a separate package of the [rewindbug project](https://github.com/bybraveHQ/rewindbug), with its source in [`packages/mcp`](https://github.com/bybraveHQ/rewindbug/tree/main/packages/mcp). The SDK runs in the browser and stays small, with rrweb as its only dependency. This server runs in Node next to your editor and needs the MCP SDK. Kept apart, the browser bundle never carries server code, and you install this one only if you use a coding agent.
 
 ## Run
 
@@ -81,3 +87,16 @@ The folder keeps the last 100 reports. Clean it by hand whenever you like.
 - **HTTPS dev server.** A browser may block requests from an `https://` page to `127.0.0.1` (Chrome Local Network Access, Safari mixed content). Check it on your setup.
 - **Containers.** Port forwarding from a devcontainer or WSL changes the `Host` header and the server answers `421`. Run the server in the same environment as the browser.
 - **Token in the agent's context.** `last_bug` returns the endpoint with the token while the folder is empty. A crafted report could make the agent repeat it. The token only guards writes to a folder on your machine: delete `.rewindbug/token` and restart to rotate it.
+
+## Support
+
+If this package saves you time, you can support maintenance:
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/bybrave)
+[![Bitcoin](https://img.shields.io/badge/Bitcoin-BTC-F7931A?logo=bitcoin&logoColor=white)](#support)
+
+Bitcoin (BTC): `bc1q37557q5jpeaxqydzwvf3jgj7zhnfpn2td3q40q`
+
+## License
+
+MIT

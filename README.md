@@ -1,6 +1,8 @@
 # rewindbug
 
 [![CI](https://github.com/bybraveHQ/rewindbug/actions/workflows/ci.yml/badge.svg)](https://github.com/bybraveHQ/rewindbug/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/rewindbug)](https://www.npmjs.com/package/rewindbug)
+[![license](https://img.shields.io/npm/l/rewindbug)](LICENSE)
 
 When a page breaks in a user's browser, rewindbug turns the last seconds before the error into a bug you can act on: the steps the user took, a Playwright test that repeats them, an rrweb recording of the page, the console and the network. It posts the report to an endpoint of your choice or hands it to your coding agent over MCP (Model Context Protocol). No backend of its own, no widget, nothing for the user to fill in.
 

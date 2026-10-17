@@ -1,6 +1,6 @@
 {
   "name": "rewindbug-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for rewindbug: receives bug reports on localhost and hands the last bug to your coding agent.",
   "license": "MIT",
   "funding": "https://ko-fi.com/bybrave",
