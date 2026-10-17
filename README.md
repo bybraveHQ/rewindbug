@@ -55,6 +55,8 @@ The test fails on the same error. Fix the code and it passes: keep it as a regre
 
 ## What a report holds
 
+rewindbug runs in the browser and sees only what the page sees. An error on your server reaches a report as the 5xx answer or the missing answer the page got, with the request and the steps before it, but not as the server's own stack or logs; see [Next to your server logs](#next-to-your-server-logs).
+
 The page keeps a rolling buffer in memory and sends nothing until a trigger: an uncaught error, a rejected promise, a request that got a 5xx or never reached your site's server, or your `capture()` call (and `console.error` with `consoleErrorTrigger`); aborted and timed-out requests are not triggers, and neither are the browser's `Script error.` for a cross-origin script and its `ResizeObserver loop` warning. Then rewindbug builds one JSON report from the buffer. Without a recording it reaches `bufferSeconds` (30 by default) back. With one it starts at a recording checkpoint: at least `bufferSeconds` back on a page that has run that long, shorter right after load, and with no upper bound on a quiet page, because a checkpoint is taken on the first DOM event after `bufferSeconds`:
 
 - **trigger**: the error with its message and stack, or the failed request;
@@ -168,6 +170,30 @@ Both run on one page. rewindbug wraps `fetch`, `XMLHttpRequest`, `console.log`, 
 </Sentry.ErrorBoundary>
 ```
 
+### Next to your server logs
+
+If your server answers with a request id, keep the last one per path in your API client and tag the report with the id of the request that failed. The issue then leads to the server log of that request:
+
+```ts
+const requestIds = new Map<string, string>();
+// in your API client, after each response
+const id = response.headers.get("x-request-id");
+if (id) requestIds.set(new URL(response.url).pathname, id);
+
+init({
+  endpoint: "/api/bugs",
+  beforeSend(report) {
+    const failed = report.network.find(
+      (e) => e.id === report.trigger.requestId,
+    );
+    const id =
+      failed && requestIds.get(new URL(failed.url, location.href).pathname);
+    if (id) report.context.tags = { ...report.context.tags, requestId: id };
+    return report;
+  },
+});
+```
+
 ## Options
 
 | Option                | Default                                       | What it is for                                                                                                                                                                                                                                                                   |
@@ -259,7 +285,6 @@ Turning things off:
 Known gaps in this version:
 
 - secrets inside the URL path (`/reset/<token>`) are not cut;
-- `href` and `src` attributes inside the recorded DOM do not pass `urlFilter`;
 - text typed into `contenteditable` elements is visible in the recording unless they are under `maskSelector`;
 - `sendBeacon` when the tab is hidden or closed sends the endpoint's cookies: a beacon cannot omit them, `fetch` does;
 - everything in a report came from the page, including text an attacker could have put there. Treat it as data, and read the generated test before you run it.
