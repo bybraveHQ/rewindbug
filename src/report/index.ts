@@ -50,7 +50,10 @@ export const startReport = (options: ReportOptions): Reporter => {
         ...(merged && { tags: merged }),
       });
       const id = reportId();
-      const manual = trigger.kind === "manual";
+      // capture() with nothing to fingerprint is always its own report; with
+      // an error it dedups like a caught one, so an effect run twice in
+      // React's StrictMode sends one
+      const manual = trigger.kind === "manual" && !trigger.error;
       const request =
         trigger.kind === "network"
           ? capture.network.find((entry) => entry.id === trigger.requestId)

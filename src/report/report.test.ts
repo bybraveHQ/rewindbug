@@ -97,7 +97,7 @@ describe("startReport", () => {
     ]);
   });
 
-  test("manual reports use the id as fingerprint and are never deduped", async () => {
+  test("capture() without an error uses the id as fingerprint and is never deduped", async () => {
     const manual: Trigger = {
       kind: "manual",
       at: NOW,
@@ -109,6 +109,29 @@ describe("startReport", () => {
     const reports = await sent();
     expect(reports).toHaveLength(2);
     for (const report of reports) expect(report.fingerprint).toBe(report.id);
+  });
+
+  test("capture(error) dedups the same error, as StrictMode calls it twice", async () => {
+    const manual: Trigger = {
+      kind: "manual",
+      at: NOW,
+      message: "Cannot read name",
+      error: { name: "TypeError", message: "Cannot read name" },
+    };
+    reporter.onTrigger(manual);
+    reporter.onTrigger({ ...manual, at: NOW + 1 });
+    reporter.onTrigger({
+      ...manual,
+      message: "other",
+      error: { name: "Error", message: "other" },
+    });
+    await reporter.flush();
+    const reports = await sent();
+    expect(reports.map((report) => report.trigger.message)).toEqual([
+      "Cannot read name",
+      "other",
+    ]);
+    expect(reports[0]?.fingerprint).not.toBe(reports[0]?.id);
   });
 
   test("network triggers fingerprint the request they point to", async () => {

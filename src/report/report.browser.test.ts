@@ -45,7 +45,8 @@ test("a manual capture sends a full report with the replay", async () => {
     context: { app: { release: "e2e" } },
     limits: { truncated: [] },
   });
-  expect(report.fingerprint).toBe(report.id);
+  // capture(error) is fingerprinted by its error, so repeats dedup
+  expect(report.fingerprint).not.toBe(report.id);
   expect(report.test).toMatch(
     /^import \{ test, expect \} from "@playwright\/test";/,
   );
