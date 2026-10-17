@@ -15,7 +15,7 @@ First working release. `0.0.1` was a name placeholder.
 ### examples/endpoint
 
 - One Node file receives and stores reports in the layout `rewindbug-mcp` reads; a Docker image.
-- `/view` plays the recordings with steps, test, console and network; beyond loopback it needs a view token of its own, separate from the write token in the app's code.
+- `/view` plays the recordings with steps, test, console and network. Reading takes a view token of its own, sent in a header: the server makes one on loopback, and beyond loopback it is required. On loopback only pages served from loopback may post reports.
 - With `REWINDBUG_GITHUB_REPO` and `REWINDBUG_GITHUB_TOKEN`, every new bug becomes a GitHub issue and a repeat a comment on it.
 
 ### rewindbug-mcp

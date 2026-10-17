@@ -73,6 +73,20 @@
   </head>
   <body>
     <h1>rewindbug reports</h1>
+    <form id="login" hidden>
+      <p>
+        Paste the view token. The server prints this page's address with it at
+        start; on loopback it is also in <code>view-token</code> in the reports
+        folder.
+      </p>
+      <input
+        id="token"
+        type="password"
+        autocomplete="off"
+        aria-label="View token"
+      />
+      <button type="submit">Open</button>
+    </form>
     <p id="empty" hidden>
       No reports yet. Point the SDK at this server's <code>/report</code> URL,
       with the write token in the path if the server has one.
@@ -118,7 +132,28 @@
       const CDN = "https://cdn.jsdelivr.net/npm/@rrweb/replay@";
       const FALLBACK_VERSION = "2.1.7";
       const VERSION = /^\d+\.\d+\.\d+$/;
-      const base = location.pathname;
+      const base = location.pathname.replace(/\/$/, "");
+      const KEY = "rewindbug-view-token";
+      // the token arrives once as #token=…, then lives in this browser only;
+      // the fragment never reaches a server or a Referer header
+      const hash = new URLSearchParams(location.hash.slice(1));
+      let token = hash.get("token") ?? "";
+      try {
+        if (token) localStorage.setItem(KEY, token);
+        else token = localStorage.getItem(KEY) ?? "";
+      } catch {
+        // storage blocked: the token works for this page load only
+      }
+      hash.delete("token");
+      history.replaceState(
+        null,
+        "",
+        hash.size ? `#${hash}` : location.pathname,
+      );
+      const get = (path) =>
+        fetch(`${base}${path}`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
       const byId = (id) => document.getElementById(id);
       const text = (id, value) => (byId(id).textContent = value);
       const lines = (items) => (items.length ? items.join("\n") : "none");
@@ -256,12 +291,12 @@
       };
 
       const load = async (name) => {
-        const response = await fetch(`${base}/${name}.json`);
+        const response = await get(`/${name}.json`);
         if (!response.ok) {
           text("headline", `Report ${name} is gone (${response.status})`);
           return;
         }
-        history.replaceState(null, "", `#${name}`);
+        history.replaceState(null, "", `#report=${name}`);
         const issue = byId("issue");
         const item = list.find((s) => s.name === name);
         // only a GitHub web link, never a javascript: or data: url
@@ -280,10 +315,25 @@
           ...(s.automated ? ["automated"] : []),
         ].join(" · ");
 
-      const list = await (await fetch(`${base}/list`)).json();
-      if (list.length === 0) {
+      const listed = await get("/list");
+      if (listed.status === 401) {
+        try {
+          localStorage.removeItem(KEY);
+        } catch {
+          // nothing stored
+        }
+        const login = byId("login");
+        login.hidden = false;
+        login.onsubmit = (event) => {
+          event.preventDefault();
+          location.hash = `token=${encodeURIComponent(byId("token").value.trim())}`;
+          location.reload();
+        };
+      }
+      const list = listed.ok ? await listed.json() : [];
+      if (listed.ok && list.length === 0) {
         byId("empty").hidden = false;
-      } else {
+      } else if (listed.ok) {
         byId("report").hidden = false;
         const pick = byId("pick");
         pick.replaceChildren(
@@ -298,7 +348,7 @@
         byId("speed").onchange = () =>
           player?.setConfig({ speed: Number(byId("speed").value) });
         byId("again").onclick = () => player?.play(0);
-        const wanted = location.hash.slice(1);
+        const wanted = hash.get("report");
         const first = list.find((s) => s.name === wanted) ?? list[0];
         pick.value = first.name;
         await load(first.name);

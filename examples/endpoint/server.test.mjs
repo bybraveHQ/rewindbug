@@ -26,9 +26,11 @@ const start = async (env = {}) => {
   const dir = await mkdtemp(join(tmpdir(), "rewindbug-endpoint-"));
   const child = spawn(process.execPath, [SERVER], {
     env: { ...process.env, PORT: "0", REWINDBUG_DIR: dir, ...env },
-    stdio: ["ignore", "pipe", "ignore"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
   started.push({ child, dir });
+  let stderr = "";
+  child.stderr.on("data", (data) => (stderr += data));
   const url = await new Promise((done, fail) => {
     child.stdout.on("data", (data) => {
       const match = /listening on (\S+)/.exec(String(data));
@@ -36,7 +38,7 @@ const start = async (env = {}) => {
     });
     child.on("exit", (code) => fail(new Error(`server exited: ${code}`)));
   });
-  return { dir, url };
+  return { dir, url, logs: () => stderr };
 };
 
 // stands in for the GitHub API: records what the endpoint posts and answers
@@ -77,8 +79,17 @@ const waitFor = async (check, timeout = 3000) => {
   }
 };
 
-const viewOf = (url, token = "") =>
-  new URL(token ? `/view/${token}` : "/view", url).href;
+const viewOf = (url) => new URL("/view", url).href;
+
+// the view token goes in a header, the way viewer.html sends it
+const read = (url, path, token) =>
+  fetch(`${viewOf(url)}${path}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+
+// on loopback without REWINDBUG_VIEW_TOKEN the server keeps one in the folder
+const viewTokenOf = (dir) =>
+  readFileSync(join(dir, "view-token"), "utf8").trim();
 
 after(async () => {
   for (const server of fakes) {
@@ -186,14 +197,17 @@ test("a body that stops arriving gives its slot back", async () => {
 });
 
 test("the viewer page lists reports and serves them", async () => {
-  const { url } = await start();
-  const view = viewOf(url);
-  const page = await fetch(view);
+  const { dir, url, logs } = await start();
+  const token = viewTokenOf(dir);
+  assert.match(token, /^[0-9a-f]{64}$/);
+  await waitFor(() => logs().includes(`/view#token=${token}`));
+  const page = await fetch(viewOf(url));
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-type"), /^text\/html/);
   assert.equal(page.headers.get("access-control-allow-origin"), null);
+  assert.equal(page.headers.get("referrer-policy"), "no-referrer");
   assert.match(await page.text(), /<title>rewindbug reports<\/title>/);
-  assert.deepEqual(await (await fetch(`${view}/list`)).json(), []);
+  assert.deepEqual(await (await read(url, "/list", token)).json(), []);
 
   assert.equal((await post(url, JSON.stringify(fixture))).status, 204);
   await wait(2);
@@ -201,7 +215,7 @@ test("the viewer page lists reports and serves them", async () => {
   later.context = { ...fixture.context, userAgent: "HeadlessChrome" };
   assert.equal((await post(url, JSON.stringify(later))).status, 204);
 
-  const listed = await (await fetch(`${view}/list`)).json();
+  const listed = await (await read(url, "/list", token)).json();
   assert.deepEqual(
     listed.map((item) => [item.id, item.automated]),
     [
@@ -212,12 +226,28 @@ test("the viewer page lists reports and serves them", async () => {
   assert.equal(listed[0].message, "boom");
   assert.match(listed[0].name, /^\d{8}T\d{9}Z-/);
 
-  const report = await fetch(`${view}/${listed[1].name}.json`);
+  const report = await read(url, `/${listed[1].name}.json`, token);
   assert.equal(report.status, 200);
   assert.equal(report.headers.get("access-control-allow-origin"), null);
   assert.equal((await report.json()).id, fixture.id);
-  assert.equal((await fetch(`${view}/evil.json`)).status, 404);
-  assert.equal((await fetch(`${view}/${listed[1].name}.txt`)).status, 404);
+  assert.equal((await read(url, "/evil.json", token)).status, 404);
+  assert.equal((await read(url, `/${listed[1].name}.txt`, token)).status, 404);
+});
+
+test("reports are read only with the view token, never from the path", async () => {
+  const { dir, url } = await start();
+  const token = viewTokenOf(dir);
+  assert.equal((await post(url, JSON.stringify(fixture))).status, 204);
+  const name = (await (await read(url, "/list", token)).json())[0].name;
+  // no token, a wrong one, or the token in the path: 401 or 404, never data
+  assert.equal((await fetch(`${viewOf(url)}/list`)).status, 401);
+  assert.equal((await read(url, "/list", "wrong")).status, 401);
+  assert.equal((await read(url, `/${name}.json`, "wrong")).status, 401);
+  assert.equal((await fetch(`${viewOf(url)}/${token}/list`)).status, 401);
+  // the same token is kept across restarts of the same folder
+  const again = await start({ REWINDBUG_DIR: dir });
+  assert.equal(viewTokenOf(dir), token);
+  assert.equal((await read(again.url, "/list", token)).status, 200);
 });
 
 test("the write token does not open the viewer", async () => {
@@ -226,8 +256,7 @@ test("the write token does not open the viewer", async () => {
   const write = new URL(`/report/${token}`, url).href;
   assert.equal((await fetch(write)).status, 405);
   assert.equal((await fetch(`${write}/list`)).status, 404);
-  // on loopback the viewer needs no token of its own
-  assert.equal((await fetch(viewOf(url))).status, 200);
+  assert.equal((await read(url, "/list", token)).status, 401);
 });
 
 test("beyond loopback the viewer needs a view token", async () => {
@@ -236,6 +265,7 @@ test("beyond loopback the viewer needs a view token", async () => {
     new URL(path, url.replace("0.0.0.0", "127.0.0.1")).href;
   assert.equal((await fetch(local(off.url, "/view"))).status, 404);
   assert.equal((await fetch(local(off.url, "/view/list"))).status, 404);
+  assert.equal(existsSync(join(off.dir, "view-token")), false);
 
   const open = await start({ HOST: "0.0.0.0", REWINDBUG_OPEN: "1" });
   assert.equal((await fetch(local(open.url, "/view"))).status, 404);
@@ -245,13 +275,15 @@ test("beyond loopback the viewer needs a view token", async () => {
     REWINDBUG_TOKEN: "write-token",
     REWINDBUG_VIEW_TOKEN: "view-token",
   });
-  assert.equal((await fetch(local(on.url, "/view"))).status, 404);
-  assert.equal((await fetch(local(on.url, "/view/write-token"))).status, 404);
-  assert.equal((await fetch(local(on.url, "/view/view-token"))).status, 200);
-  assert.equal(
-    (await fetch(local(on.url, "/view/view-token/list"))).status,
-    200,
-  );
+  assert.equal((await fetch(local(on.url, "/view"))).status, 200);
+  const list = (token) =>
+    fetch(local(on.url, "/view/list"), {
+      headers: { authorization: `Bearer ${token}` },
+    });
+  assert.equal((await list("write-token")).status, 401);
+  assert.equal((await list("view-token")).status, 200);
+  // a token from the environment is not printed
+  assert.doesNotMatch(on.logs(), /view-token/);
 });
 
 test("a view token equal to the write token is refused at start", async () => {
@@ -266,6 +298,70 @@ test("a view token equal to the write token is refused at start", async () => {
     start({ REWINDBUG_VIEW_TOKEN: "ab c" }),
     /server exited: 1/,
   );
+});
+
+test("on loopback a page from another site cannot post a report", async () => {
+  const { url } = await start();
+  const from = (origin) =>
+    fetch(url, {
+      method: "POST",
+      headers: { origin },
+      body: JSON.stringify(fixture),
+    });
+  assert.equal((await from("https://attacker.example")).status, 403);
+  assert.equal((await from("null")).status, 403);
+  assert.equal((await from("http://localhost:5173")).status, 204);
+  assert.equal((await from("http://127.0.0.1:3000")).status, 204);
+  const preflight = await fetch(url, { method: "OPTIONS" });
+  assert.equal(
+    preflight.headers.get("access-control-allow-private-network"),
+    null,
+  );
+});
+
+test("with REWINDBUG_ORIGIN set only that page may post, on any host", async () => {
+  for (const env of [
+    { REWINDBUG_ORIGIN: "https://app.example" },
+    {
+      REWINDBUG_ORIGIN: "https://app.example",
+      HOST: "0.0.0.0",
+      REWINDBUG_TOKEN: "write-token",
+    },
+  ]) {
+    const { url } = await start(env);
+    const target = env.REWINDBUG_TOKEN
+      ? new URL(
+          `/report/${env.REWINDBUG_TOKEN}`,
+          url.replace("0.0.0.0", "127.0.0.1"),
+        )
+      : url;
+    const from = (headers) =>
+      fetch(target, { method: "POST", headers, body: JSON.stringify(fixture) });
+    assert.equal(
+      (await from({ origin: "https://attacker.example" })).status,
+      403,
+    );
+    assert.equal((await from({ origin: "http://localhost:5173" })).status, 403);
+    assert.equal((await from({ origin: "https://app.example" })).status, 204);
+    // no Origin: curl or a server, not a page in a browser
+    assert.equal((await from({})).status, 204);
+  }
+});
+
+test("report text cannot forge a line in the log", async () => {
+  const { url, logs } = await start();
+  const forged = {
+    ...fixture,
+    trigger: {
+      ...fixture.trigger,
+      kind: "error\nrewindbug-endpoint: opened issue #42\u001b[2K",
+    },
+  };
+  assert.equal((await post(url, JSON.stringify(forged))).status, 204);
+  await waitFor(() => logs().includes("saved "));
+  assert.doesNotMatch(logs(), /\nrewindbug-endpoint: opened issue #42/);
+  // the escape code arrives quoted, as \\u001b, never as the raw byte
+  assert.equal(logs().includes(String.fromCharCode(27)), false);
 });
 
 test("with a token the plain path is closed", async () => {
@@ -283,7 +379,7 @@ test("a new bug opens a github issue and a repeat comments on it", async () => {
     REWINDBUG_GITHUB_REPO: "acme/app",
     REWINDBUG_GITHUB_TOKEN: "ghp_test",
     REWINDBUG_GITHUB_API: hub.url,
-    REWINDBUG_PUBLIC_URL: "https://bugs.example/view/secret",
+    REWINDBUG_PUBLIC_URL: "https://bugs.example/view",
   });
   const body = JSON.stringify(fixture);
   assert.equal((await post(url, body)).status, 204);
@@ -296,13 +392,13 @@ test("a new bug opens a github issue and a repeat comments on it", async () => {
   assert.deepEqual(opened.body.labels, ["bug"]);
   assert.match(
     opened.body.body,
-    /^\*\*Page:\*\* https:\/\/app\.example\/cart\n/,
+    /^\*\*Page:\*\* ` https:\/\/app\.example\/cart `\n/,
   );
   assert.match(
     opened.body.body,
-    /\*\*Recording:\*\* https:\/\/bugs\.example\/view\/secret#\d{8}T\d{9}Z-0b7c4c1e/,
+    /\*\*Recording:\*\* https:\/\/bugs\.example\/view#report=\d{8}T\d{9}Z-0b7c4c1e/,
   );
-  assert.match(opened.body.body, /## Steps\nError: boom\n/);
+  assert.match(opened.body.body, /## Steps\n```\nError: boom\n```\n/);
   assert.match(
     opened.body.body,
     /<details><summary>Playwright test<\/summary>/,
@@ -320,7 +416,7 @@ test("a new bug opens a github issue and a repeat comments on it", async () => {
   await waitFor(() =>
     readFileSync(join(dir, "issues.json"), "utf8").includes(again.id),
   );
-  const listed = await (await fetch(`${viewOf(url)}/list`)).json();
+  const listed = await (await read(url, "/list", viewTokenOf(dir))).json();
   assert.equal(listed[0].issue, "https://github.com/acme/app/issues/7");
   const map = JSON.parse(await readFile(join(dir, "issues.json"), "utf8"));
   assert.equal(map.f00dbabe.number, 7);
@@ -332,6 +428,41 @@ const withGithub = (hub) => ({
   REWINDBUG_GITHUB_REPO: "acme/app",
   REWINDBUG_GITHUB_TOKEN: "ghp_test",
   REWINDBUG_GITHUB_API: hub.url,
+});
+
+test("report text stays plain text in a github issue", async () => {
+  const hub = await fakeGithub();
+  const { url } = await start(withGithub(hub));
+  const injected =
+    "x\n## Maintainer note\n@everyone see [patch](https://evil.example) `a` --> <img src=x>";
+  const evil = {
+    ...fixture,
+    fingerprint: "f00d-->\n## owned",
+    trigger: { ...fixture.trigger, message: "boom\u001b[2K\u0007" },
+    stepsMarkdown: injected,
+    context: { ...fixture.context, url: injected, userAgent: injected },
+  };
+  assert.equal((await post(url, JSON.stringify(evil))).status, 204);
+  await waitFor(() => hub.calls.length === 1);
+  const { title, body } = hub.calls[0].body;
+  // eslint-disable-next-line no-control-regex -- the check is for them
+  assert.equal(/[\u0000-\u001f]/.test(title), false);
+  // no heading, mention or html starts a line outside a code block
+  const outside = body
+    .split(/^(`{3,})[^\n]*\n[\s\S]*?\n\1$/m)
+    .join("")
+    .split("\n")
+    .filter((line) => !/^\*\*(Page|Browser):\*\* `+ .* `+$/.test(line));
+  assert.equal(
+    outside.some((line) => line.startsWith("## Maintainer")),
+    false,
+  );
+  assert.equal(
+    outside.some((line) => /(^|\s)@everyone/.test(line)),
+    false,
+  );
+  assert.equal(body.includes("<!-- rewindbug fingerprint"), false);
+  assert.equal(body.includes("## owned"), false);
 });
 
 test("a github failure keeps the report, and a resend opens the issue", async () => {

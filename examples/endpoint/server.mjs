@@ -23,7 +23,7 @@ const ORIGIN = process.env.REWINDBUG_ORIGIN || "*";
 const OPEN = process.env.REWINDBUG_OPEN === "1";
 // reading is its own secret: the write token sits in the app's bundle,
 // where every visitor can see it
-const VIEW_TOKEN = process.env.REWINDBUG_VIEW_TOKEN || "";
+const VIEW_TOKEN_ENV = process.env.REWINDBUG_VIEW_TOKEN || "";
 // set the first two and every new bug becomes a GitHub issue
 const GITHUB_REPO = process.env.REWINDBUG_GITHUB_REPO || "";
 const GITHUB_TOKEN = process.env.REWINDBUG_GITHUB_TOKEN || "";
@@ -32,7 +32,7 @@ const GITHUB_LABELS = (process.env.REWINDBUG_GITHUB_LABELS ?? "bug")
   .map((label) => label.trim())
   .filter(Boolean);
 const GITHUB_API = process.env.REWINDBUG_GITHUB_API || "https://api.github.com";
-// the viewer as a browser reaches it, view token included, for the
+// the viewer as a browser reaches it, without the view token, for the
 // recording link in an issue
 const PUBLIC_URL = process.env.REWINDBUG_PUBLIC_URL || "";
 
@@ -56,14 +56,16 @@ const TOKEN_CHARS = /^[A-Za-z0-9._~-]+$/;
 
 const REPORTS = join(DIR, "reports");
 const PATH = TOKEN ? `/report/${TOKEN}` : "/report";
-const VIEW_PATH = VIEW_TOKEN ? `/view/${VIEW_TOKEN}` : "/view";
-// beyond loopback the reports are readable only behind a view token
-const VIEWABLE = LOOPBACK.has(HOST) || VIEW_TOKEN !== "";
+const VIEW_PATH = "/view";
+const VIEW_TOKEN_FILE = join(DIR, "view-token");
+const VIEW_TOKEN_BYTES = 32;
+// a page on another site must not write to a server on this machine; with
+// no REWINDBUG_ORIGIN only pages served from loopback may post to loopback
+const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const CORS = {
   "access-control-allow-origin": ORIGIN,
   "access-control-allow-methods": "POST",
   "access-control-allow-headers": "content-type",
-  "access-control-allow-private-network": "true",
 };
 
 class HttpError extends Error {
@@ -76,10 +78,9 @@ class HttpError extends Error {
 const log = (text) => process.stderr.write(`rewindbug-endpoint: ${text}\n`);
 const digest = (value) => createHash("sha256").update(value).digest();
 const expected = digest(PATH);
-const expectedView = digest(VIEW_PATH);
-// the request path starts with the route: compared in constant time
-const under = (url, path, hash) =>
-  timingSafeEqual(digest(url.slice(0, path.length)), hash);
+// set at start: REWINDBUG_VIEW_TOKEN, else one kept in the folder on
+// loopback; empty beyond loopback without the variable, reading is then off
+let viewToken = "";
 const VIEWER = new URL("viewer.html", import.meta.url);
 
 // 2026-10-16T12:00:00.123Z -> 20261016T120000123Z
@@ -274,7 +275,8 @@ const receive = async (request) => {
     log(`cannot save a report: ${error.message}`);
     return 500;
   }
-  log(`saved ${report.id}: ${report.trigger.kind}`);
+  // report text is quoted: a newline or an escape code cannot forge a log line
+  log(`saved ${report.id}: ${JSON.stringify(report.trigger.kind)}`);
   return 204;
 };
 
@@ -383,12 +385,31 @@ const pathOf = (url) => {
 
 const recordingLink = (base) =>
   PUBLIC_URL
-    ? `${PUBLIC_URL}#${base}`
+    ? `${PUBLIC_URL}#report=${base}`
     : `\`${base}.json\` in the endpoint folder`;
+
+// report text is whatever anyone with the public write token sent: in an
+// issue it stays plain text, never markdown, mentions or html
+// eslint-disable-next-line no-control-regex -- these are what it removes
+const CONTROL = /[\u0000-\u001f\u007f]/g;
+const FINGERPRINT = /^[\w-]{1,64}$/;
+
+const plain = (text) => String(text).replace(CONTROL, " ");
+
+// inline code with a fence longer than any backtick run inside
+const code = (text) => {
+  const clean = plain(text);
+  const longest = Math.max(
+    0,
+    ...(clean.match(/`+/g) ?? []).map((run) => run.length),
+  );
+  const ticks = "`".repeat(longest + 1);
+  return `${ticks} ${clean} ${ticks}`;
+};
 
 const issueTitle = (report) => {
   const [line] = report.trigger.message.split("\n");
-  const clean = line.trim() || report.trigger.kind;
+  const clean = plain(line).trim() || plain(report.trigger.kind);
   return clean.length > ISSUE_TITLE_MAX
     ? `${clean.slice(0, ISSUE_TITLE_MAX - 1)}…`
     : clean;
@@ -407,13 +428,13 @@ const fence = (text, lang = "") => {
 const issueBody = (report, base) => {
   const { context, trigger } = report;
   const head = [
-    `**Page:** ${context.url}`,
+    `**Page:** ${code(context.url)}`,
     `**When:** ${new Date(report.createdAt).toISOString()}`,
-    `**Browser:** ${context.userAgent}`,
+    `**Browser:** ${code(context.userAgent)}`,
     `**Recording:** ${recordingLink(base)}`,
     "",
     "## Steps",
-    report.stepsMarkdown || "none",
+    fence(report.stepsMarkdown || "none"),
     "",
     "## Error",
     fence(trigger.error?.stack || trigger.message),
@@ -441,7 +462,10 @@ const issueBody = (report, base) => {
     "",
     "</details>",
   ].join("\n");
-  const foot = `<!-- rewindbug fingerprint: ${report.fingerprint} -->`;
+  // a fingerprint that could close the comment is left out
+  const foot = FINGERPRINT.test(report.fingerprint)
+    ? `<!-- rewindbug fingerprint: ${report.fingerprint} -->`
+    : "";
   // the limit is met by dropping the logs first, then the test
   for (const parts of [
     [head, logs, test],
@@ -459,7 +483,7 @@ const issueBody = (report, base) => {
 
 const repeatComment = (report, base) =>
   [
-    `Seen again at ${new Date(report.createdAt).toISOString()} on ${report.context.url}, ${report.steps.length} steps.`,
+    `Seen again at ${new Date(report.createdAt).toISOString()} on ${code(report.context.url)}, ${report.steps.length} steps.`,
     `**Recording:** ${recordingLink(base)}`,
   ].join("\n");
 
@@ -517,8 +541,13 @@ const notifyGithub = async (report, base) => {
   log(`opened issue #${issue.number} for ${report.id}`);
 };
 
-const view = async (response, rest) => {
-  if (rest === "") {
+// the token travels in a header, never in the path: a recording rebuilt in
+// the viewer could otherwise send the page's address to another site
+const authorized = (header) =>
+  timingSafeEqual(digest(header ?? ""), digest(`Bearer ${viewToken}`));
+
+const view = async (request, response, rest) => {
+  if (rest === "" || rest.startsWith("?")) {
     const page = await readFile(VIEWER).catch(() => null);
     if (page === null) {
       log(
@@ -526,7 +555,12 @@ const view = async (response, rest) => {
       );
       return send(response, 404, "text/plain", "viewer.html is missing");
     }
+    response.setHeader("referrer-policy", "no-referrer");
     return send(response, 200, "text/html; charset=utf-8", page);
+  }
+  if (!authorized(request.headers.authorization)) {
+    response.setHeader("www-authenticate", "Bearer");
+    return send(response, 401, "text/plain", "");
   }
   if (rest === "/list") {
     return send(
@@ -565,16 +599,23 @@ const server = createServer(
       if (!hostAllowed(request.headers.host, server.address().port))
         return respond(response, 421);
       const url = request.url ?? "";
-      if (
-        VIEWABLE &&
-        request.method === "GET" &&
-        under(url, VIEW_PATH, expectedView)
-      )
-        return await view(response, url.slice(VIEW_PATH.length));
+      const viewing = url === VIEW_PATH || /^\/view[/?]/.test(url);
+      if (viewing && request.method === "GET" && viewToken)
+        return await view(request, response, url.slice(VIEW_PATH.length));
       if (!timingSafeEqual(digest(url), expected)) {
         response.writeHead(404).end();
         return;
       }
+      // a set REWINDBUG_ORIGIN is the only page that may post; with "*" on
+      // loopback, pages on loopback; a request without Origin is not a page
+      const origin = request.headers.origin;
+      if (
+        origin !== undefined &&
+        (ORIGIN === "*"
+          ? LOOPBACK.has(HOST) && !LOOPBACK_ORIGIN.test(origin)
+          : origin !== ORIGIN)
+      )
+        return respond(response, 403);
       if (request.method === "OPTIONS") return respond(response, 204);
       if (request.method !== "POST") return respond(response, 405);
       // the SDK keeps a refused report queued and sends it again later
@@ -602,14 +643,14 @@ const server = createServer(
 
 for (const [name, value] of [
   ["REWINDBUG_TOKEN", TOKEN],
-  ["REWINDBUG_VIEW_TOKEN", VIEW_TOKEN],
+  ["REWINDBUG_VIEW_TOKEN", VIEW_TOKEN_ENV],
 ]) {
   if (value && !TOKEN_CHARS.test(value)) {
     log(`${name} may hold only letters, digits and . _ ~ -`);
     process.exit(1);
   }
 }
-if (VIEW_TOKEN && VIEW_TOKEN === TOKEN) {
+if (VIEW_TOKEN_ENV && VIEW_TOKEN_ENV === TOKEN) {
   log(
     "REWINDBUG_VIEW_TOKEN must differ from REWINDBUG_TOKEN, which the app's code shows to everyone",
   );
@@ -638,16 +679,29 @@ if (!LOOPBACK.has(HOST) && !TOKEN) {
   log(`listening on ${HOST} without REWINDBUG_TOKEN: anyone can write reports`);
 }
 
+// on loopback the viewer gets a token of its own, kept between runs, so
+// another user or process on the machine cannot read the reports either
+const loopbackViewToken = async () => {
+  const kept = (await readFile(VIEW_TOKEN_FILE, "utf8").catch(() => "")).trim();
+  if (TOKEN_CHARS.test(kept)) return kept;
+  const fresh = randomBytes(VIEW_TOKEN_BYTES).toString("hex");
+  await writeFile(VIEW_TOKEN_FILE, `${fresh}\n`, { mode: 0o600 });
+  return fresh;
+};
+
 await mkdir(REPORTS, { recursive: true, mode: 0o700 });
+viewToken =
+  VIEW_TOKEN_ENV || (LOOPBACK.has(HOST) ? await loopbackViewToken() : "");
 server.listen(PORT, HOST, () => {
   const { port } = server.address();
   const shown = TOKEN ? PATH.replace(TOKEN, "<REWINDBUG_TOKEN>") : PATH;
   process.stdout.write(`listening on http://${HOST}:${port}${shown}\n`);
   log(`reports folder ${REPORTS}`);
+  // a token from the environment is the operator's own: it is not printed
   log(
-    VIEWABLE
-      ? `viewer on http://${HOST}:${port}${VIEW_TOKEN ? "/view/<REWINDBUG_VIEW_TOKEN>" : VIEW_PATH}`
-      : "viewer off: set REWINDBUG_VIEW_TOKEN to read reports beyond loopback",
+    !viewToken
+      ? "viewer off: set REWINDBUG_VIEW_TOKEN to read reports beyond loopback"
+      : `viewer on http://${HOST}:${port}${VIEW_PATH}#token=${VIEW_TOKEN_ENV ? "<REWINDBUG_VIEW_TOKEN>" : viewToken}`,
   );
   if (GITHUB_REPO) log(`new bugs go to github.com/${GITHUB_REPO}/issues`);
 });
