@@ -15,18 +15,19 @@ export default defineConfig({
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
   ],
+  // never a server already on the port: the tests run code it hands back
   webServer: [
     {
       command: "node demo/serve.ts",
       url: `http://127.0.0.1:${PORT}/`,
       env: { PORT: String(PORT) },
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
     },
     {
       command: "node e2e/fixtures/serve.ts",
       url: `http://127.0.0.1:${FIXTURES_PORT}/enter.html`,
       env: { PORT: String(FIXTURES_PORT) },
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
     },
   ],
 });
