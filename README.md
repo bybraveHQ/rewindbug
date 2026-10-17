@@ -108,6 +108,14 @@ rewindbug sees uncaught errors and rejected promises. An error your framework ca
 | Vue                  | `app.config.errorHandler = (error) => capture(error)`                                                                              |
 | Angular              | `handleError(error) { capture(error); }` in your `ErrorHandler`                                                                    |
 
+Your own end-to-end tests load the page too, and every failing run would send a report, the regression tests rewindbug generates included. Playwright, Selenium and other WebDriver tools set `navigator.webdriver`, so skip `init` there:
+
+```ts
+if (!navigator.webdriver) init({ endpoint: "/api/bugs" });
+```
+
+Use an environment variable of your build instead if the test run should be told apart in another way.
+
 ### A page without a bundler
 
 Import the single-file build, rrweb included, about 35 kB gzip:

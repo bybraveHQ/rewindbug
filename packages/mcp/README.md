@@ -1,6 +1,6 @@
 # rewindbug-mcp
 
-MCP server for [rewindbug](../../README.md). It receives bug reports on localhost and hands the last bug to your coding agent in Claude Code or Cursor: trigger, reproduction steps, console, network and a Playwright test, without the heavy rrweb recording.
+MCP server for [rewindbug](https://github.com/bybraveHQ/rewindbug#readme). It receives bug reports on localhost and hands the last bug to your coding agent in Claude Code or Cursor: trigger, reproduction steps, console, network and a Playwright test, without the heavy rrweb recording.
 
 Your app sends a report on an error, the server stores it, and you ask the agent "look at the last bug".
 
@@ -48,7 +48,7 @@ const endpoint = import.meta.env.VITE_REWINDBUG_ENDPOINT;
 if (endpoint) init({ endpoint });
 ```
 
-A page without a bundler imports the single-file build `dist/rewindbug.browser.js` from a CDN in a plain `<script type="module">`, see the [main README](../../README.md#install).
+A page without a bundler imports the single-file build `dist/rewindbug.browser.js` from a CDN in a plain `<script type="module">`, see the [main README](https://github.com/bybraveHQ/rewindbug#install).
 
 The token lives in `.rewindbug/token`. Delete the file and restart the server to get a new one.
 
@@ -60,7 +60,7 @@ The token lives in `.rewindbug/token`. Delete the file and restart the server to
 | `list_bugs` | summaries, newest first; `limit` 1 to 100, 20 by default          |
 | `get_bug`   | one report by `id` from `list_bugs`                               |
 
-A bug has no rrweb events: `report.replay.events` is only their count. The full report with the recording is in the file at `path`. Long bodies and lists are cut to keep the answer under 200 KiB, `trimmed` says what was cut. JSON Schema of every input and output: [`schema/tools.schema.json`](schema/tools.schema.json).
+A bug has no rrweb events: `report.replay.events` is only their count. The full report with the recording is in the file at `path`. Long bodies and lists are cut to keep the answer under 200 KiB, `trimmed` says what was cut. JSON Schema of every input and output: [`schema/tools.schema.json`](https://github.com/bybraveHQ/rewindbug/blob/main/packages/mcp/schema/tools.schema.json).
 
 Everything in a report comes from a web page. The agent gets it marked as data, not instructions. Read `report.test` before running it.
 
