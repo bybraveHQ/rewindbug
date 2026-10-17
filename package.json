@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "description": "Rewind the last seconds before a browser error into a ready bug report: steps, replay, console, network, Playwright test. No backend.",
   "license": "MIT",
+  "funding": "https://ko-fi.com/bybrave",
   "type": "module",
   "sideEffects": false,
   "exports": {
