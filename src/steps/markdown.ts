@@ -34,6 +34,16 @@ const PHRASES: Phrases = {
 
 const QUOTES: [string, string] = ["“", "”"];
 
+// 1 -> 1st, 2 -> 2nd, 11 -> 11th, 21 -> 21st
+const ordinal = (n: number): string => {
+  const tens = n % 100;
+  const suffix =
+    tens >= 11 && tens <= 13
+      ? "th"
+      : (["th", "st", "nd", "rd"][n % 10] ?? "th");
+  return `${n}${suffix}`;
+};
+
 // page text must stay plain text in a tracker: one line, no markup, no
 // @mentions
 export const escapeMarkdown = (text: string): string =>
@@ -61,7 +71,10 @@ const describe = (step: Step, words: Phrases, quotes: [string, string]) => {
     case "click": {
       if (!target?.name)
         return words.click(escapeMarkdown(target?.css ?? words.element));
-      const name = `${quotes[0]}${escapeMarkdown(target.name)}${quotes[1]}`;
+      // several elements share the name: say which one, as the test does
+      const nth =
+        target.nth === undefined ? "" : `the ${ordinal(target.nth + 1)} `;
+      const name = `${nth}${quotes[0]}${escapeMarkdown(target.name)}${quotes[1]}`;
       return words.click(
         target.role ? `${name} (${escapeMarkdown(target.role)})` : name,
       );

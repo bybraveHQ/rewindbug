@@ -182,3 +182,46 @@ describe("names and indexes for a click", () => {
     expect(targetOf($("p"), "")).not.toHaveProperty("nth");
   });
 });
+
+describe("fields found by their label", () => {
+  test("a password field is named and marked by its label", () => {
+    html(`
+      <label>Email <input type="email"></label>
+      <label>Password <input type="password"></label>
+    `);
+    const target = targetOf($("input[type=password]"), "");
+    expect(target).toMatchObject({ name: "Password", label: true });
+    expect(target).not.toHaveProperty("role");
+    expect(target).not.toHaveProperty("nth");
+  });
+
+  test("aria-label counts, a placeholder or title does not", () => {
+    html(`
+      <input type="password" aria-label="PIN">
+      <input type="password" placeholder="Secret">
+      <div title="Hint">x</div>
+    `);
+    expect(targetOf($("input[aria-label]"), "")).toMatchObject({
+      name: "PIN",
+      label: true,
+    });
+    expect(targetOf($("input[placeholder]"), "")).not.toHaveProperty("label");
+    expect(targetOf($("div"), "")).not.toHaveProperty("label");
+  });
+
+  test("a field with a role keeps getByRole", () => {
+    html("<label>Email <input type=email></label>");
+    expect(targetOf($("input"), "")).toMatchObject({ role: "textbox" });
+    expect(targetOf($("input"), "")).not.toHaveProperty("label");
+  });
+
+  test("nth counts the fields with the same label", () => {
+    html(`
+      <form><label>Password <input type="password"></label></form>
+      <form><label>Password <input type="password"></label></form>
+    `);
+    const second = document.querySelectorAll("input")[1];
+    if (!second) throw new Error("no input");
+    expect(targetOf(second, "")).toMatchObject({ label: true, nth: 1 });
+  });
+});

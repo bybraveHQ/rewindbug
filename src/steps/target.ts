@@ -104,6 +104,21 @@ const labelledBy = (element: Element): string | undefined => {
     .join(" ");
 };
 
+// the part of the accessible name Playwright's getByLabel matches
+const labelName = (element: Element): string | undefined => {
+  for (const value of [
+    labelledBy(element),
+    element.getAttribute("aria-label"),
+    labelText(element),
+  ]) {
+    const name = value ? collapse(value).slice(0, MAX_NAME_LENGTH) : "";
+    if (name) return name;
+  }
+  return undefined;
+};
+
+const LABELLED = "input, select, textarea, [aria-label], [aria-labelledby]";
+
 export const nameOf = (
   element: Element,
   maskSelector: string,
@@ -222,14 +237,27 @@ export const targetOf = (
     if (role) target.role = role;
     const name = nameOf(element, maskSelector);
     if (name) target.name = name;
-    // without a test id or a role with a name the test falls back to css:
-    // then nth counts the css matches
+    // a field with no role, a password among them, is found by its label;
+    // nth then counts the fields with the same label
+    if (!testId && !role && name && labelName(element) === name)
+      target.label = true;
+    // without a test id, a role with a name or a label the test falls back
+    // to css: then nth counts the css matches
     const nth =
       testId || (role && name)
         ? nthOf(element, target, maskSelector)
-        : target.unique
-          ? undefined
-          : [...document.querySelectorAll(target.css)].indexOf(element);
+        : target.label
+          ? nthAmong(
+              element,
+              [...document.querySelectorAll(LABELLED)].filter(
+                (candidate) =>
+                  !isMasked(candidate, maskSelector) &&
+                  labelName(candidate) === name,
+              ),
+            )
+          : target.unique
+            ? undefined
+            : [...document.querySelectorAll(target.css)].indexOf(element);
     if (nth !== undefined && nth >= 0) target.nth = nth;
     return target;
   } catch {

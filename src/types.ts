@@ -90,6 +90,9 @@ export type Target = {
   css: string;
   unique: boolean;
   nth?: number;
+  // the name comes from a <label>, aria-label or aria-labelledby, so a field
+  // without a role is found by its label
+  label?: true;
 };
 
 export type StepKey = "Enter" | "Escape" | "Tab";

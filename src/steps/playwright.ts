@@ -2,7 +2,7 @@ import type { NetworkEntry, Report, Step, Target } from "../types.ts";
 
 export type TestSource = Pick<
   Report,
-  "trigger" | "range" | "steps" | "network"
+  "trigger" | "range" | "steps" | "network" | "console"
 >;
 
 const FOLLOW_MS = 1000;
@@ -93,6 +93,10 @@ const locator = (target: Target | undefined): string | null | undefined => {
   } else if (target.role && target.name && ROLES.has(target.role)) {
     const exact = target.name.length < MAX_NAME_LENGTH ? ", exact: true" : "";
     base = `page.getByRole(${str(target.role)}, { name: ${str(target.name)}${exact} })`;
+  } else if (target.label && target.name) {
+    const exact =
+      target.name.length < MAX_NAME_LENGTH ? ", { exact: true }" : "";
+    base = `page.getByLabel(${str(target.name)}${exact})`;
   } else if (target.unique) {
     nth = undefined;
   } else if (target.role && target.name) {
@@ -216,6 +220,16 @@ const origin = (raw: string): string => {
 
 export const playwrightTest = (source: TestSource): string => {
   const { trigger, range, network } = source;
+  // an error handed to capture() that the page also logged, as error
+  // boundaries do: the test fails while it is logged
+  const logged =
+    trigger.kind === "manual" &&
+    trigger.error !== undefined &&
+    trigger.message !== "" &&
+    source.console.some(
+      (entry) =>
+        entry.level === "error" && entry.message.includes(trigger.message),
+    );
   const requests = new Map(network.map((entry) => [entry.id, entry]));
   const failing =
     trigger.kind === "network" && trigger.requestId !== undefined
@@ -258,6 +272,13 @@ export const playwrightTest = (source: TestSource): string => {
       "const errors: string[] = [];",
       'page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });',
     );
+  // Firefox shows an Error argument as JSHandle@object in m.text(): the
+  // arguments are read as they come, while their handles are alive
+  if (logged)
+    body.push(
+      "const logged: Promise<string>[] = [];",
+      'page.on("console", (m) => { if (m.type() === "error") logged.push(Promise.all(m.args().map((a) => a.evaluate((v) => String(v)).catch(() => ""))).then((args) => [m.text(), ...args].join(" "))); });',
+    );
   // a request with no step behind it starts with the page itself
   if (failing && !linked) body.push(waitFor(failing));
   body.push(`await page.goto(at(${str(startPath(range.startUrl))}));`);
@@ -275,7 +296,11 @@ export const playwrightTest = (source: TestSource): string => {
   }
 
   if (failing && !linked) body.push(ASSERT_RESPONSE);
-  if (trigger.kind === "manual")
+  if (logged)
+    body.push(
+      `expect((await Promise.all(logged)).filter((text) => text.includes(${str(trigger.message)}))).toEqual([]);`,
+    );
+  else if (trigger.kind === "manual")
     body.push("// manual capture: add the assertion that failed");
   else if (trigger.kind !== "network") body.push("expect(errors).toEqual([]);");
 

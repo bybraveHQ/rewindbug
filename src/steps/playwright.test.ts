@@ -22,6 +22,7 @@ const source = (
   range: { start: 0, end: 100, startUrl: START },
   steps,
   network: [],
+  console: [],
   ...extra,
 });
 
@@ -124,6 +125,38 @@ describe("playwrightTest", () => {
       'await page.locator("main > button:nth-of-type(2)").nth(1).click();',
       "// click on main > button:nth-of-type(2): several elements match, pick the right one",
     ]);
+  });
+
+  test("finds a field without a role by its label", () => {
+    const password = target({
+      css: "label:nth-of-type(2) > input:nth-of-type(1)",
+      name: "Password",
+      label: true,
+    });
+    const lines = body(
+      source([
+        {
+          t: 1,
+          kind: "fill",
+          target: password,
+          masked: true,
+          inputType: "password",
+        },
+        { t: 2, kind: "click", target: { ...password, unique: false, nth: 1 } },
+        // a name from a placeholder or title is not a label: css stays
+        { t: 3, kind: "click", target: target({ name: "Hint" }) },
+      ]),
+    );
+    expect(lines).toContain(
+      'await page.getByLabel("Password", { exact: true }).fill(input["Password"]);',
+    );
+    expect(lines).toContain(
+      'await page.getByLabel("Password", { exact: true }).nth(1).click();',
+    );
+    expect(lines).toContain(
+      'await page.locator("main > button:nth-of-type(2)").click();',
+    );
+    expect(lines.join("\n")).not.toContain("label:nth-of-type");
   });
 
   test("matches a name cut at 40 characters as a substring", () => {
@@ -371,6 +404,60 @@ describe("playwrightTest", () => {
     expect(manual).not.toContain("errors");
   });
 
+  test("a captured error the page also logged fails the test while logged", () => {
+    const manual: Trigger = {
+      kind: "manual",
+      at: 100,
+      message: "Cannot read name",
+      error: { name: "TypeError", message: "Cannot read name" },
+    };
+    const logged = playwrightTest(
+      source([], {
+        trigger: manual,
+        console: [
+          {
+            t: 90,
+            level: "error",
+            message: "TypeError: Cannot read name\n\n    at Profile",
+          },
+        ],
+      }),
+    );
+    expect(logged).toContain("const logged: Promise<string>[] = [];");
+    expect(logged).toContain("a.evaluate((v) => String(v))");
+    expect(logged).toContain(
+      'expect((await Promise.all(logged)).filter((text) => text.includes("Cannot read name"))).toEqual([]);',
+    );
+    expect(logged).not.toContain("manual capture: add the assertion");
+
+    // not logged, or logged at another level, or no error object: a comment
+    for (const extra of [
+      { trigger: manual },
+      {
+        trigger: manual,
+        console: [
+          { t: 90, level: "warn" as const, message: "Cannot read name" },
+        ],
+      },
+      {
+        trigger: {
+          kind: "manual" as const,
+          at: 100,
+          message: "Cannot read name",
+        },
+        console: [
+          { t: 90, level: "error" as const, message: "Cannot read name" },
+        ],
+      },
+    ]) {
+      const code = playwrightTest(source([], extra));
+      expect(code).toContain(
+        "// manual capture: add the assertion that failed",
+      );
+      expect(code).not.toContain("logged");
+    }
+  });
+
   test("waits for the failing request around its step", () => {
     const network: NetworkEntry[] = [
       {
@@ -540,9 +627,18 @@ describe("playwrightTest", () => {
       const code = playwrightTest(
         source(steps, {
           network,
-          trigger: { kind, at: 100, message: evil, requestId: 1 },
+          trigger: {
+            kind,
+            at: 100,
+            message: evil,
+            requestId: 1,
+            error: { name: "Error", message: evil },
+          },
+          // makes the manual test check the console
+          console: [{ t: 90, level: "error", message: evil }],
         }),
       );
+      if (kind === "manual") expect(code).toContain("const logged");
       const { diagnostics } = ts.transpileModule(code, {
         reportDiagnostics: true,
       });

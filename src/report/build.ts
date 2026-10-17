@@ -47,7 +47,10 @@ export type ReportInput = {
   describeTest: (report: TestInput) => string;
 };
 
-export type TestInput = Pick<Report, "trigger" | "range" | "steps" | "network">;
+export type TestInput = Pick<
+  Report,
+  "trigger" | "range" | "steps" | "network" | "console"
+>;
 
 type MetaEvent = { type: number; timestamp: number; data?: { href?: unknown } };
 
@@ -151,6 +154,7 @@ export const buildReport = (input: ReportInput): Report => {
       typeof href === "string" ? href : firstAddress(steps, context.url),
   };
 
+  const consoleEntries = inRange(capture.console);
   return {
     schemaVersion: 0,
     id: input.id,
@@ -166,8 +170,14 @@ export const buildReport = (input: ReportInput): Report => {
     range,
     steps,
     stepsMarkdown: input.describeSteps(steps, trigger.message),
-    test: input.describeTest({ trigger, range, steps, network: requests }),
-    console: inRange(capture.console),
+    test: input.describeTest({
+      trigger,
+      range,
+      steps,
+      network: requests,
+      console: consoleEntries,
+    }),
+    console: consoleEntries,
     network: requests,
     replay,
     limits,

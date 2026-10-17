@@ -94,3 +94,34 @@ describe("escapeMarkdown", () => {
     );
   });
 });
+
+describe("several elements with one name", () => {
+  test.each([
+    [1, "2nd"],
+    [2, "3rd"],
+    [3, "4th"],
+    [10, "11th"],
+    [11, "12th"],
+    [12, "13th"],
+    [20, "21st"],
+    [101, "102nd"],
+  ])("nth %i reads as the %s", (nth, word) => {
+    const click: Step = {
+      t: 1,
+      kind: "click",
+      target: { ...target("Add", "button"), nth },
+    };
+    expect(stepsMarkdown([click], "Oops")).toContain(
+      `1. Click the ${word} “Add” (button)`,
+    );
+  });
+
+  test("a single element has no number", () => {
+    const click: Step = {
+      t: 1,
+      kind: "click",
+      target: target("Add", "button"),
+    };
+    expect(stepsMarkdown([click], "Oops")).toContain("1. Click “Add” (button)");
+  });
+});
