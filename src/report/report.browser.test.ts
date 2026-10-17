@@ -49,8 +49,9 @@ test("a manual capture sends a full report with the replay", async () => {
   expect(report.test).toMatch(
     /^import \{ test, expect \} from "@playwright\/test";/,
   );
+  const start = new URL(report.range.startUrl);
   expect(report.test).toContain(
-    `await page.goto(${JSON.stringify(report.range.startUrl)});`,
+    `await page.goto(at(${JSON.stringify(start.pathname + start.search)}));`,
   );
   const events = report.replay?.events as { type: number; timestamp: number }[];
   expect(events.slice(0, 2).map((e) => e.type)).toEqual([4, 2]);

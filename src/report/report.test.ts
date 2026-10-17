@@ -32,11 +32,8 @@ const error = (message: string): Trigger => ({
   error: { name: "Error", message },
 });
 
-beforeEach(() => {
-  fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
-  vi.stubGlobal("fetch", fetchMock);
-  source = { console: [], network: [], lastEvicted: {} };
-  reporter = startReport({
+const start = (extra: Partial<Parameters<typeof startReport>[0]> = {}) =>
+  startReport({
     endpoint: ENDPOINT,
     maxReportBytes: 512 * 1024,
     bufferSeconds: 30,
@@ -48,7 +45,14 @@ beforeEach(() => {
     describeSteps: () => "",
     describeTest: () => "",
     now: () => NOW,
+    ...extra,
   });
+
+beforeEach(() => {
+  fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetchMock);
+  source = { console: [], network: [], lastEvicted: {} };
+  reporter = start();
 });
 
 afterEach(() => {
@@ -168,5 +172,80 @@ describe("startReport", () => {
     await reporter.flush();
     window.dispatchEvent(new Event("pagehide"));
     expect(beacon).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("beforeSend and tags", () => {
+  test("beforeSend changes a report or drops it", async () => {
+    reporter.stop();
+    reporter = start({
+      beforeSend: (report) =>
+        report.trigger.message === "noise"
+          ? null
+          : { ...report, stepsMarkdown: "redacted" },
+    });
+    reporter.onTrigger(error("noise"));
+    reporter.onTrigger(error("boom"));
+    await reporter.flush();
+    const reports = await sent();
+    expect(reports.map((r) => [r.trigger.message, r.stepsMarkdown])).toEqual([
+      ["boom", "redacted"],
+    ]);
+  });
+
+  test("a throwing beforeSend sends nothing", async () => {
+    reporter.stop();
+    reporter = start({
+      beforeSend: () => {
+        throw new Error("redaction failed");
+      },
+    });
+    reporter.onTrigger(error("boom"));
+    await reporter.flush();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("a dropped report gives back its slot, not its dedup window", async () => {
+    const beforeSend = vi.fn((report: Report) =>
+      report.trigger.message === "noise" ? null : report,
+    );
+    reporter.stop();
+    reporter = start({ beforeSend });
+    for (let i = 0; i < 12; i++) reporter.onTrigger(error("noise"));
+    for (let i = 0; i < 10; i++)
+      reporter.onTrigger(error(`real ${"abcdefghij"[i]}`));
+    await reporter.flush();
+    expect(beforeSend).toHaveBeenCalledTimes(11);
+    expect(await sent()).toHaveLength(10);
+  });
+
+  test("an async beforeSend drops the report", async () => {
+    reporter.stop();
+    reporter = start({
+      beforeSend: (async (report: Report) => report) as never,
+    });
+    reporter.onTrigger(error("boom"));
+    await reporter.flush();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("tags of one capture go on top of the init tags", async () => {
+    reporter.stop();
+    reporter = start({ tags: { user: "u-1", plan: "free" } });
+    reporter.onTrigger(
+      { kind: "manual", at: NOW, message: "manual capture" },
+      { plan: "pro", sentry: "abc123" },
+    );
+    reporter.onTrigger({ kind: "manual", at: NOW, message: "manual capture" });
+    await reporter.flush();
+    // reports leave in the order their compression ends
+    const tags = (await sent()).map((r) => r.context.tags);
+    expect(tags).toHaveLength(2);
+    expect(tags).toEqual(
+      expect.arrayContaining([
+        { user: "u-1", plan: "pro", sentry: "abc123" },
+        { user: "u-1", plan: "free" },
+      ]),
+    );
   });
 });

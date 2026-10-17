@@ -45,9 +45,55 @@ describe("init", () => {
 });
 
 describe("init options", () => {
-  test("returns false for a relative endpoint", async () => {
+  test("accepts an endpoint relative to the page", async () => {
     const init = await load();
-    expect(init({ endpoint: "/collect", replay: false })).toBe(false);
+    expect(init({ endpoint: "/collect", replay: false })).toBe(true);
+  });
+
+  test("sampleRate 0 starts nothing, 1 starts", async () => {
+    const before = globalThis.fetch;
+    expect((await load())({ ...OPTIONS, sampleRate: 0 })).toBe(false);
+    expect(globalThis.fetch).toBe(before);
+    vi.resetModules();
+    expect((await load())({ ...OPTIONS, sampleRate: 1 })).toBe(true);
+  });
+
+  test("debug says why init did not start, silence without it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    (await load())({ endpoint: "ftp://x/", replay: false });
+    expect(warn).not.toHaveBeenCalled();
+    vi.resetModules();
+    (await load())({ endpoint: "ftp://x/", replay: false, debug: true });
+    expect(warn).toHaveBeenCalledWith(
+      "rewindbug: not started, endpoint is not http(s)",
+    );
+    warn.mockRestore();
+  });
+
+  test("init without options returns false", async () => {
+    const init = await load();
+    expect(init(undefined as never)).toBe(false);
+  });
+
+  test("custom urlFilter and networkTrigger get the defaults", async () => {
+    const api = await import("./index.ts");
+    const urlFilter = vi.fn((url: string, base: (u: string) => string) =>
+      base(url),
+    );
+    const networkTrigger = vi.fn(() => false);
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response("", { status: 500 }),
+    );
+    api.init({ ...OPTIONS, urlFilter, networkTrigger });
+    await fetch("https://api.example/x");
+    expect(urlFilter).toHaveBeenCalledWith(
+      "https://api.example/x",
+      api.defaultUrlFilter,
+    );
+    expect(networkTrigger).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 500 }),
+      api.defaultNetworkTrigger,
+    );
   });
 });
 

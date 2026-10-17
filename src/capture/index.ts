@@ -1,4 +1,4 @@
-import type { ConsoleEntry, NetworkEntry, Trigger } from "../types.ts";
+import type { ConsoleEntry, Context, NetworkEntry, Trigger } from "../types.ts";
 import { RingBuffer } from "../shared/ring.ts";
 import { defaultUrlFilter, type UrlFilter } from "../shared/url-filter.ts";
 import { installConsole } from "./console.ts";
@@ -31,13 +31,13 @@ export type CaptureSnapshot = {
 
 export type Capture = {
   snapshot: () => CaptureSnapshot;
-  manual: (error?: unknown) => void;
+  manual: (error?: unknown, tags?: Context["tags"]) => void;
   stop: () => void;
 };
 
 export const startCapture = (
   options: CaptureOptions,
-  onTrigger: (trigger: Trigger) => void,
+  onTrigger: (trigger: Trigger, tags?: Context["tags"]) => void,
 ): Capture => {
   const filter = options.urlFilter ?? defaultUrlFilter;
   const now = options.now ?? Date.now;
@@ -79,9 +79,9 @@ export const startCapture = (
         lastEvicted,
       };
     },
-    manual: (error) => {
+    manual: (error, tags) => {
       try {
-        onTrigger(manualTrigger(error, filter, now()));
+        onTrigger(manualTrigger(error, filter, now()), tags);
       } catch {
         // capture() must never throw into the caller
       }

@@ -1,4 +1,4 @@
-import type { Context, Step, Trigger } from "../types.ts";
+import type { Context, Report, Step, Trigger } from "../types.ts";
 import type { UrlFilter } from "../shared/url-filter.ts";
 import {
   buildReport,
@@ -19,6 +19,7 @@ export type ReportOptions = {
   filter: UrlFilter;
   app?: Context["app"];
   tags?: Context["tags"];
+  beforeSend?: (report: Report) => Report | null;
   capture: () => CaptureSource;
   replay: (until: number) => ReplaySource;
   steps: () => StepsSource;
@@ -28,7 +29,7 @@ export type ReportOptions = {
 };
 
 export type Reporter = {
-  onTrigger: (trigger: Trigger) => void;
+  onTrigger: (trigger: Trigger, tags?: Context["tags"]) => void;
   flush: () => Promise<void>;
   stop: () => void;
 };
@@ -37,17 +38,17 @@ export const startReport = (options: ReportOptions): Reporter => {
   const gate = new ReportGate();
   const sender = new Sender(options.endpoint);
   const now = options.now ?? Date.now;
-  const extra = {
-    ...(options.app && { app: options.app }),
-    ...(options.tags && { tags: options.tags }),
-  };
 
   // everything up to the queue runs synchronously: buffers are copied at the
   // trigger, only compression is async
-  const onTrigger = (trigger: Trigger) => {
+  const onTrigger = (trigger: Trigger, tags?: Context["tags"]) => {
     try {
       const capture = options.capture();
-      const context = collectContext(options.filter, extra);
+      const merged = (options.tags || tags) && { ...options.tags, ...tags };
+      const context = collectContext(options.filter, {
+        ...(options.app && { app: options.app }),
+        ...(merged && { tags: merged }),
+      });
       const id = reportId();
       const manual = trigger.kind === "manual";
       const request =
@@ -71,8 +72,20 @@ export const startReport = (options: ReportOptions): Reporter => {
         describeSteps: options.describeSteps,
         describeTest: options.describeTest,
       });
+      let final: Report | null = report;
+      try {
+        final = options.beforeSend ? options.beforeSend(report) : report;
+      } catch {
+        // a beforeSend that throws may have been redacting: send nothing
+        final = null;
+      }
+      // an async beforeSend returns a promise, not a report
+      if (!final || "then" in final) {
+        gate.refund(fingerprint, true);
+        return;
+      }
       sender.track(
-        fitReport(report, options.maxReportBytes).catch(() => {
+        fitReport(final, options.maxReportBytes).catch(() => {
           gate.refund(fingerprint);
           return undefined;
         }),

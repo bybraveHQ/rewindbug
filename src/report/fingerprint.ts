@@ -105,9 +105,10 @@ export class ReportGate {
     return true;
   }
 
-  // a report that failed to build gives its slot and dedup window back
-  refund(fingerprint: string): void {
+  // a report that failed to build gives its slot and dedup window back;
+  // one that beforeSend dropped keeps the window, so a loop is not rebuilt
+  refund(fingerprint: string, keepWindow = false): void {
     this.sent -= 1;
-    this.lastSent.delete(fingerprint);
+    if (!keepWindow) this.lastSent.delete(fingerprint);
   }
 }
