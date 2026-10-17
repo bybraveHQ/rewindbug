@@ -52,17 +52,42 @@ const format = (
   return out;
 };
 
+const piece = (arg: unknown): string => {
+  try {
+    return truncate(format(arg, 0, new WeakSet()), MAX_ARG_LENGTH);
+  } catch {
+    return "[Unserializable]";
+  }
+};
+
+// console's format string, as browsers apply it: only when arguments follow;
+// %c takes its css argument and prints nothing, a placeholder without an
+// argument stays
+const substitute = (args: readonly unknown[]): readonly unknown[] => {
+  const [first, ...rest] = args;
+  if (typeof first !== "string" || rest.length === 0) return args;
+  let used = 0;
+  const text = first.replace(/%([sdifoOc%])/g, (match, code: string) => {
+    if (code === "%") return "%";
+    if (used >= rest.length) return match;
+    const arg = rest[used++];
+    // String() takes a symbol where a template literal would throw
+    return code === "c"
+      ? ""
+      : code === "f"
+        ? String(parseFloat(String(arg)))
+        : code === "d" || code === "i"
+          ? String(parseInt(String(arg)))
+          : piece(arg);
+  });
+  return [text, ...rest.slice(used)];
+};
+
 export const serializeArgs = (
   args: readonly unknown[],
   filter: UrlFilter,
 ): string => {
-  const parts = args.map((arg) => {
-    try {
-      return truncate(format(arg, 0, new WeakSet()), MAX_ARG_LENGTH);
-    } catch {
-      return "[Unserializable]";
-    }
-  });
+  const parts = substitute(args).map(piece);
   return truncate(
     filterUrlsInText(parts.join(" "), filter),
     MAX_MESSAGE_LENGTH,

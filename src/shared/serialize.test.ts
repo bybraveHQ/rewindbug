@@ -48,3 +48,39 @@ describe("serializeArgs", () => {
     );
   });
 });
+
+describe("console format strings", () => {
+  const keep = defaultUrlFilter;
+  test("react's caught-error log reads like the browser shows it", () => {
+    const message = serializeArgs(
+      [
+        "%o\n\n%s\n\n%s\n",
+        new TypeError("x is undefined"),
+        "    at Profile",
+        "The above error occurred in the <Profile> component.",
+      ],
+      keep,
+    );
+    expect(message).not.toMatch(/%[os]/);
+    expect(message).toBe(
+      "TypeError: x is undefined\n\n    at Profile\n\nThe above error occurred in the <Profile> component.\n",
+    );
+  });
+
+  test("%c drops its css, %d %i %f parse numbers, %% is one percent", () => {
+    expect(serializeArgs(["%c styled", "color: red"], keep)).toBe(" styled");
+    expect(serializeArgs(["%d%% done", "50.7"], keep)).toBe("50% done");
+    expect(serializeArgs(["%i and %f", 3.9, "2.5"], keep)).toBe("3 and 2.5");
+    expect(serializeArgs(["%s", { a: 1 }], keep)).toBe("{a: 1}");
+  });
+
+  test("extra arguments follow, a placeholder without one stays", () => {
+    expect(serializeArgs(["%s:", "a", "b"], keep)).toBe("a: b");
+    expect(serializeArgs(["%s and %s", "a"], keep)).toBe("a and %s");
+  });
+
+  test("a lone string is not a format string", () => {
+    expect(serializeArgs(["100%% done"], keep)).toBe("100%% done");
+    expect(serializeArgs([42, "%s"], keep)).toBe("42 %s");
+  });
+});
