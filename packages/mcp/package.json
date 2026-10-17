@@ -3,7 +3,6 @@
   "version": "0.0.1",
   "description": "MCP server for rewindbug: receives bug reports on localhost and hands the last bug to your coding agent.",
   "license": "MIT",
-  "private": true,
   "type": "module",
   "bin": {
     "rewindbug-mcp": "./dist/cli.js"
@@ -13,6 +12,24 @@
     "schema",
     "README.md"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bybraveHQ/rewindbug.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/bybraveHQ/rewindbug/tree/main/packages/mcp#readme",
+  "bugs": "https://github.com/bybraveHQ/rewindbug/issues",
+  "keywords": [
+    "mcp",
+    "bug-report",
+    "claude-code",
+    "cursor",
+    "rewindbug",
+    "playwright"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22"
   },

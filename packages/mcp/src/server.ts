@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { toBug, type Bug } from "./bug.ts";
@@ -20,7 +21,12 @@ const MAX_LIMIT = 100;
 const CONSOLE_LINES = 10;
 const OPEN = "<<<page-data";
 const CLOSE = ">>>page-data";
-const VERSION = "0.0.1";
+// next to src/ in the repo and to dist/ in the published package
+const VERSION = (
+  JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string }
+).version;
 
 export type ServerOptions = {
   dir: string;

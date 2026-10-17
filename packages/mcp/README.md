@@ -6,17 +6,10 @@ Your app sends a report on an error, the server stores it, and you ask the agent
 
 ## Run
 
-The package is not on npm yet. Build it from the repo:
+It needs Node 22 or newer. Add it to Claude Code:
 
 ```bash
-pnpm install
-pnpm --filter rewindbug-mcp build
-```
-
-Add it to Claude Code:
-
-```bash
-claude mcp add rewindbug --env REWINDBUG_DIR=/absolute/path/to/your-app/.rewindbug -- node /absolute/path/to/rewindbug/packages/mcp/dist/cli.js
+claude mcp add rewindbug --env REWINDBUG_DIR=/absolute/path/to/your-app/.rewindbug -- npx -y rewindbug-mcp
 ```
 
 Or to Cursor, in `.cursor/mcp.json`:
@@ -25,15 +18,15 @@ Or to Cursor, in `.cursor/mcp.json`:
 {
   "mcpServers": {
     "rewindbug": {
-      "command": "node",
-      "args": ["/absolute/path/to/rewindbug/packages/mcp/dist/cli.js"],
+      "command": "npx",
+      "args": ["-y", "rewindbug-mcp"],
       "env": { "REWINDBUG_DIR": "/absolute/path/to/your-app/.rewindbug" }
     }
   }
 }
 ```
 
-After the npm release the command becomes `npx rewindbug-mcp`.
+From a clone of the repo, build it with `pnpm install && pnpm --filter rewindbug-mcp build` and run `node packages/mcp/dist/cli.js` in place of `npx -y rewindbug-mcp`.
 
 Always set `REWINDBUG_DIR`: clients start MCP servers in a working folder of their own choosing. Add `.rewindbug/` to your app's `.gitignore`.
 
@@ -45,12 +38,14 @@ On start the server prints the endpoint to stderr, and `last_bug` returns it whi
 rewindbug-mcp: receiving reports at http://127.0.0.1:7357/<token>
 ```
 
-The token in the path is what lets only your app write reports: without it any open tab could send a fake bug to your agent. Keep the endpoint out of git: read it from the environment at build time, the way your bundler does it (`import.meta.env.VITE_REWINDBUG_ENDPOINT` in Vite, `process.env.REWINDBUG_ENDPOINT` in webpack or Next.js), or paste it on a local-only page:
+The token in the path is what lets only your app write reports: without it any open tab could send a fake bug to your agent. Keep the endpoint out of git: put it in a local env file and read it at build time, so builds without it skip `init`:
 
 ```ts
 import { init } from "rewindbug";
 
-init({ endpoint: process.env.REWINDBUG_ENDPOINT });
+// Vite; webpack and Next.js read process.env.NEXT_PUBLIC_REWINDBUG_ENDPOINT or similar
+const endpoint = import.meta.env.VITE_REWINDBUG_ENDPOINT;
+if (endpoint) init({ endpoint });
 ```
 
 A page without a bundler imports the single-file build `dist/rewindbug.browser.js` from a CDN in a plain `<script type="module">`, see the [main README](../../README.md#install).
