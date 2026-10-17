@@ -172,6 +172,52 @@ describe("replay", () => {
     expect(recorded).not.toContain("swordfish");
   });
 
+  it("maskInputs: false still masks a password, whatever its type", async () => {
+    // the snapshot passes values through the same maskInputFn as typing
+    document.body.innerHTML = `
+      <input type="text" name="password" value="hunter2">
+      <input type="text" id="new-pwd" value="swordfish">
+      <input type="text" name="city" value="Lisbon">
+    `;
+    const r = start({ maskInputs: false });
+    await recording(r);
+    const recorded = JSON.stringify(events(r));
+    expect(recorded).not.toContain("hunter2");
+    expect(recorded).not.toContain("swordfish");
+    expect(recorded).toContain("Lisbon");
+  });
+
+  it("a password mask does not tell the password's length", async () => {
+    document.body.innerHTML = `
+      <input type="password" value="hunter2">
+      <input type="password" value="correct horse battery staple">
+    `;
+    const r = start();
+    await recording(r);
+    const recorded = JSON.stringify(events(r));
+    const masks = recorded.match(/"value":"\*+"/g) ?? [];
+    expect(masks).toEqual(['"value":"********"', '"value":"********"']);
+  });
+
+  it("does not record meta tags that carry csrf or session tokens", async () => {
+    for (const name of ["_csrf", "xsrf-token", "api-token"]) {
+      const meta = document.createElement("meta");
+      meta.name = name;
+      meta.content = `SECRET-${name}`;
+      document.head.append(meta);
+    }
+    try {
+      const r = start();
+      await recording(r);
+      expect(JSON.stringify(events(r))).not.toContain("SECRET-");
+    } finally {
+      for (const meta of document.head.querySelectorAll(
+        'meta[content^="SECRET-"]',
+      ))
+        meta.remove();
+    }
+  });
+
   it("masks text under maskSelector", async () => {
     const p = document.createElement("p");
     p.className = "pii";

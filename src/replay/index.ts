@@ -15,6 +15,8 @@ const META = 4;
 const NET_EVENT = "rewindbug/net";
 // the name rrweb's console replay plugin listens for
 const CONSOLE_PLUGIN = "rrweb/console@1";
+// one length for every password, so the recording does not tell its length
+const PASSWORD_MASK = "********";
 
 export type ReplayState =
   "not-started" | "recording" | "stopped" | "dom-too-large";
@@ -210,27 +212,33 @@ export const startReplay = (options: ReplayOptions): Replay => {
     try {
       stopFn = record({
         emit,
-        maskAllInputs: options.maskInputs,
-        // same rule as the steps: data-rb-unmask shows a value unless it is a
-        // password (also one a "show password" button turned into text, which
-        // rrweb marks, or one whose autocomplete, name or id says so) or sits
-        // under maskSelector
+        // every input goes through maskInputFn, so maskInputs: false still
+        // keeps passwords out: rrweb alone would mask only type=password
+        maskAllInputs: true,
+        // same rule as the steps: a password (also one a "show password"
+        // button turned into text, which rrweb marks, or one whose
+        // autocomplete, name or id says so) or a field under maskSelector is
+        // always masked, the rest unless maskInputs is off or it sits under
+        // data-rb-unmask; a password mask has a fixed length
         maskInputFn: (text, element) =>
-          element.closest("[data-rb-unmask]") &&
-          (element as HTMLInputElement).type !== "password" &&
-          !element.hasAttribute("data-rr-is-password") &&
-          !/pass|pwd/i.test(
+          (element as HTMLInputElement).type === "password" ||
+          element.hasAttribute("data-rr-is-password") ||
+          /pass|pwd/i.test(
             `${element.getAttribute("autocomplete")} ${element.getAttribute("name")} ${element.id}`,
-          ) &&
-          !(options.maskSelector && element.closest(options.maskSelector))
-            ? text
-            : "*".repeat(text.length),
+          )
+            ? text && PASSWORD_MASK
+            : (options.maskSelector && element.closest(options.maskSelector)) ||
+                (options.maskInputs && !element.closest("[data-rb-unmask]"))
+              ? "*".repeat(text.length)
+              : text,
         ...(options.maskSelector
           ? { maskTextSelector: options.maskSelector }
           : {}),
         blockClass: "rb-block",
-        // hidden inputs carry CSRF and session tokens, never anything typed
-        blockSelector: "input[type=hidden i]",
+        // hidden inputs and meta tags carry CSRF and session tokens, never
+        // anything a person typed or saw
+        blockSelector:
+          "input[type=hidden i], meta[name*=csrf i], meta[name*=xsrf i], meta[name*=token i]",
         slimDOMOptions: "all",
         sampling: { mousemove: 50, scroll: 150, input: "last" },
         inlineStylesheet: false,
