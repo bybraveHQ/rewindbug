@@ -33,6 +33,69 @@ describe("sanitizeEvent", () => {
   });
 });
 
+describe("urls in the recorded DOM", () => {
+  const page = "https://app.test/reset?token=S&tab=2#main";
+  const masked = "https://app.test/reset?token=*&tab=2";
+
+  it("filters url attributes anywhere in a full snapshot", () => {
+    const event: RecordedEvent = {
+      type: 2,
+      timestamp: 1,
+      data: {
+        node: {
+          type: 0,
+          childNodes: [
+            {
+              type: 2,
+              tagName: "a",
+              attributes: { href: page, class: "skip", title: page },
+              childNodes: [
+                {
+                  type: 2,
+                  tagName: "img",
+                  attributes: { src: page, srcset: `${page} 1x, ${page} 2x` },
+                  childNodes: [],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    sanitizeEvent(event, defaultUrlFilter);
+    const text = JSON.stringify(event);
+    // only url attributes: a title keeps what the page showed
+    expect(text.match(/token=S/g)).toHaveLength(1);
+    expect(text).toContain(`"title":"${page}"`);
+    expect(
+      text.match(new RegExp(masked.replace(/[?*]/g, "\\$&"), "g")),
+    ).toHaveLength(4);
+  });
+
+  it("filters url attributes in added nodes and attribute changes", () => {
+    const event: RecordedEvent = {
+      type: 3,
+      timestamp: 1,
+      data: {
+        source: 0,
+        adds: [
+          {
+            parentId: 1,
+            node: { type: 2, tagName: "a", attributes: { href: page } },
+          },
+        ],
+        attributes: [{ id: 2, attributes: { href: page, "data-x": page } }],
+        removes: [],
+        texts: [],
+      },
+    };
+    sanitizeEvent(event, defaultUrlFilter);
+    const text = JSON.stringify(event);
+    expect(text.match(/token=S/g)).toHaveLength(1);
+    expect(text).toContain(`"data-x":"${page}"`);
+  });
+});
+
 describe("mutation storm", () => {
   it("counts only DOM mutation events", () => {
     expect(mutationCount(mutation(1, 3))).toBe(3);

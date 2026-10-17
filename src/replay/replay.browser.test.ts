@@ -218,6 +218,27 @@ describe("replay", () => {
     }
   });
 
+  it("a link to #main does not carry the page's secret query", async () => {
+    const before = location.href;
+    const url = new URL(before);
+    url.searchParams.set("token", "SECRET-QUERY");
+    history.replaceState(history.state, "", url);
+    try {
+      document.body.innerHTML = '<a href="#main">Skip</a><img src="?x=1">';
+      const r = start();
+      await recording(r);
+      const later = document.createElement("a");
+      later.href = "#footer";
+      document.body.append(later);
+      await until(() => events(r).some((e) => e.type === 3));
+      const recorded = JSON.stringify(events(r));
+      expect(recorded).not.toContain("SECRET-QUERY");
+      expect(recorded).toContain("token=*");
+    } finally {
+      history.replaceState(history.state, "", before);
+    }
+  });
+
   it("masks text under maskSelector", async () => {
     const p = document.createElement("p");
     p.className = "pii";
