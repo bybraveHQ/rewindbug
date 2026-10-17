@@ -21,8 +21,13 @@ With Docker, keep the reports in a folder on the host. The image listens on all 
 
 ```bash
 docker build -t rewindbug-endpoint .
-docker run -p 7358:7358 -v "$PWD/.rewindbug:/data" -e REWINDBUG_TOKEN=<long random string> rewindbug-endpoint
+export REWINDBUG_TOKEN="$(openssl rand -hex 32)"
+mkdir -p .rewindbug
+docker run -p 7358:7358 --user "$(id -u):$(id -g)" -v "$PWD/.rewindbug:/data" \
+  -e REWINDBUG_TOKEN rewindbug-endpoint
 ```
+
+`echo $REWINDBUG_TOKEN` shows the token for your app. The folder is created first and the container runs as your user, so it can write there on Linux. The token may hold only letters, digits and `. _ ~ -`; the server does not start with any other character.
 
 The endpoint then is `http://<host>:7358/report/<token>`. Put it into your app from an environment variable, not into git.
 

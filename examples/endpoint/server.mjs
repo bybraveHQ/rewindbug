@@ -21,6 +21,8 @@ const MAX_REPORTS = 100;
 const MAX_CLOCK_SKEW_MS = 5 * 60_000;
 const MAX_SUMMARY_MESSAGE = 1000;
 const REQUEST_TIMEOUT_MS = 30_000;
+// a body that stops arriving gives its slot back instead of holding it
+const BODY_IDLE_MS = 5000;
 // each request holds up to MAX_COMPRESSED_BYTES + MAX_BODY_BYTES in memory
 const MAX_CONCURRENT = 4;
 const GZIP_MAGIC = [0x1f, 0x8b];
@@ -28,6 +30,8 @@ const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const NAME = /^\d{8}T\d{9}Z-[0-9a-f-]{36}$/;
+// the token is compared with the raw request path, so it must need no encoding
+const TOKEN_CHARS = /^[A-Za-z0-9._~-]+$/;
 
 const REPORTS = join(DIR, "reports");
 const PATH = TOKEN ? `/report/${TOKEN}` : "/report";
@@ -192,6 +196,8 @@ const readBody = (request) =>
       if (!over) chunks.push(chunk);
     });
     request.on("error", () => fail(new HttpError(400)));
+    // a destroyed request has no end; after a normal end this is a no-op
+    request.on("close", () => fail(new HttpError(400)));
     request.on("end", () => {
       if (over) return fail(new HttpError(413));
       const raw = Buffer.concat(chunks);
@@ -257,6 +263,7 @@ const server = createServer(
         return respond(response, 503);
       }
       active += 1;
+      request.setTimeout(BODY_IDLE_MS, () => request.destroy());
       try {
         respond(response, await receive(request));
       } finally {
@@ -272,6 +279,11 @@ const server = createServer(
     }
   },
 );
+
+if (TOKEN && !TOKEN_CHARS.test(TOKEN)) {
+  log("REWINDBUG_TOKEN may hold only letters, digits and . _ ~ -");
+  process.exit(1);
+}
 
 // anyone who reaches an open port could fill the folder an agent reads
 if (!LOOPBACK.has(HOST) && !TOKEN) {

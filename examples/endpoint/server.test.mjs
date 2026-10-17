@@ -2,6 +2,7 @@
 // rewindbug-mcp's own store reads what it wrote
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { setTimeout as wait } from "node:timers/promises";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,8 @@ import { listSummaries, readReport } from "../../packages/mcp/src/store.ts";
 
 const SERVER = fileURLToPath(new URL("server.mjs", import.meta.url));
 const OVERSIZE_BYTES = 3 * 1024 * 1024;
+// a little over the server's BODY_IDLE_MS
+const BODY_WAIT_MS = 6000;
 const started = [];
 
 const start = async (env = {}) => {
@@ -105,6 +108,30 @@ test("more requests at once than it holds are refused with 503", async () => {
   }
   for (const req of held) req.destroy();
   assert.equal(status, 503);
+});
+
+test("a token that needs url encoding is refused at start", async () => {
+  await assert.rejects(
+    start({ REWINDBUG_TOKEN: "ab c#d" }),
+    /server exited: 1/,
+  );
+});
+
+test("a body that stops arriving gives its slot back", async () => {
+  const { url } = await start();
+  const target = new URL(url);
+  const { request } = await import("node:http");
+  const held = [];
+  for (let i = 0; i < 4; i++) {
+    const req = request(target, { method: "POST" });
+    req.on("error", () => undefined);
+    req.write("{");
+    held.push(req);
+  }
+  await wait(BODY_WAIT_MS);
+  const status = (await post(url, JSON.stringify(fixture))).status;
+  for (const req of held) req.destroy();
+  assert.equal(status, 204);
 });
 
 test("with a token the plain path is closed", async () => {
