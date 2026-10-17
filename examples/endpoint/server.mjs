@@ -2,7 +2,14 @@
 // Receives the gzip-JSON reports the rewindbug SDK posts and stores them in
 // the folder layout rewindbug-mcp reads, so a coding agent can pick them up.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { createGunzip } from "node:zlib";
@@ -14,6 +21,20 @@ const DIR = resolve(process.env.REWINDBUG_DIR || ".rewindbug");
 const TOKEN = process.env.REWINDBUG_TOKEN || "";
 const ORIGIN = process.env.REWINDBUG_ORIGIN || "*";
 const OPEN = process.env.REWINDBUG_OPEN === "1";
+// reading is its own secret: the write token sits in the app's bundle,
+// where every visitor can see it
+const VIEW_TOKEN = process.env.REWINDBUG_VIEW_TOKEN || "";
+// set the first two and every new bug becomes a GitHub issue
+const GITHUB_REPO = process.env.REWINDBUG_GITHUB_REPO || "";
+const GITHUB_TOKEN = process.env.REWINDBUG_GITHUB_TOKEN || "";
+const GITHUB_LABELS = (process.env.REWINDBUG_GITHUB_LABELS ?? "bug")
+  .split(",")
+  .map((label) => label.trim())
+  .filter(Boolean);
+const GITHUB_API = process.env.REWINDBUG_GITHUB_API || "https://api.github.com";
+// the viewer as a browser reaches it, view token included, for the
+// recording link in an issue
+const PUBLIC_URL = process.env.REWINDBUG_PUBLIC_URL || "";
 
 const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024;
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -35,6 +56,9 @@ const TOKEN_CHARS = /^[A-Za-z0-9._~-]+$/;
 
 const REPORTS = join(DIR, "reports");
 const PATH = TOKEN ? `/report/${TOKEN}` : "/report";
+const VIEW_PATH = VIEW_TOKEN ? `/view/${VIEW_TOKEN}` : "/view";
+// beyond loopback the reports are readable only behind a view token
+const VIEWABLE = LOOPBACK.has(HOST) || VIEW_TOKEN !== "";
 const CORS = {
   "access-control-allow-origin": ORIGIN,
   "access-control-allow-methods": "POST",
@@ -52,6 +76,11 @@ class HttpError extends Error {
 const log = (text) => process.stderr.write(`rewindbug-endpoint: ${text}\n`);
 const digest = (value) => createHash("sha256").update(value).digest();
 const expected = digest(PATH);
+const expectedView = digest(VIEW_PATH);
+// the request path starts with the route: compared in constant time
+const under = (url, path, hash) =>
+  timingSafeEqual(digest(url.slice(0, path.length)), hash);
+const VIEWER = new URL("viewer.html", import.meta.url);
 
 // 2026-10-16T12:00:00.123Z -> 20261016T120000123Z
 const stamp = (ms) => new Date(ms).toISOString().replace(/[-:.]/g, "");
@@ -155,11 +184,29 @@ const save = async (report, text, receivedAt) => {
     await removeFile(join(REPORTS, `${name}.summary.json`));
     await removeFile(join(REPORTS, `${name}.json`));
   }
+  return base;
+};
+
+// GitHub has a queue of its own: the SDK gets its answer once the report is
+// on disk, and one at a time keeps one issue per fingerprint
+let githubQueue = Promise.resolve();
+let githubPending = 0;
+const toGithub = (report, base) => {
+  githubPending += 1;
+  githubQueue = githubQueue
+    .then(() => notifyGithub(report, base))
+    .catch((error) => log(`github: ${error.message}`))
+    .finally(() => {
+      githubPending -= 1;
+    });
 };
 
 let queue = Promise.resolve();
 const saveInOrder = (report, text, receivedAt) => {
-  const done = queue.then(() => save(report, text, receivedAt));
+  const done = queue.then(async () => {
+    const base = await save(report, text, receivedAt);
+    if (GITHUB_REPO) toGithub(report, base);
+  });
   queue = done.catch(() => undefined);
   return done;
 };
@@ -235,6 +282,272 @@ const respond = (response, status) => {
   if (!response.headersSent) response.writeHead(status, CORS).end();
 };
 
+// the viewer is same-origin: no CORS on what it reads, so a page from
+// another site cannot read reports through the user's browser
+const send = (response, status, type, body) => {
+  response.writeHead(status, { "content-type": type }).end(body);
+};
+
+const AUTOMATED = /Headless|Playwright/;
+const REPO_NAME = /^[\w.-]+\/[\w.-]+$/;
+const ISSUES = join(DIR, "issues.json");
+const ISSUE_TITLE_MAX = 120;
+const ISSUE_LINES_MAX = 20;
+const ISSUE_LINE_MAX = 200;
+// GitHub refuses bodies over 65536 characters
+const ISSUE_BODY_MAX = 60_000;
+const ISSUE_IDS_MAX = 100;
+const GITHUB_TIMEOUT_MS = 10_000;
+const HTTPS = /^https:\/\//;
+
+// newest first; a summary without its report (being written) is skipped
+const list = async () => {
+  const names = (await readdir(REPORTS).catch(() => []))
+    .filter((file) => file.endsWith(".summary.json"))
+    .map((file) => file.slice(0, -".summary.json".length))
+    .filter((name) => NAME.test(name))
+    .sort()
+    .reverse();
+  const issues = await readIssues();
+  const items = [];
+  for (const name of names) {
+    try {
+      const summary = JSON.parse(
+        await readFile(join(REPORTS, `${name}.summary.json`), "utf8"),
+      );
+      const { context } = JSON.parse(
+        await readFile(join(REPORTS, `${name}.json`), "utf8"),
+      );
+      items.push({
+        ...summary,
+        name,
+        automated: AUTOMATED.test(context?.userAgent ?? ""),
+        issue: issues?.[summary.fingerprint]?.url,
+      });
+    } catch {
+      // a pair being replaced or removed right now is not listed
+    }
+  }
+  return items;
+};
+
+// one issue per fingerprint: the map lives outside reports/, which
+// rewindbug-mcp lists
+// null when the file is there but unreadable: it is then left alone, not
+// overwritten with a fresh map that would open duplicate issues
+const readIssues = async () => {
+  let text;
+  try {
+    text = await readFile(ISSUES, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return {};
+    log(`cannot read ${ISSUES}: ${error.message}`);
+    return null;
+  }
+  try {
+    const map = JSON.parse(text);
+    if (isObject(map)) return map;
+  } catch {
+    // reported below
+  }
+  log(`${ISSUES} is not a JSON object: fix or delete it`);
+  return null;
+};
+
+const writeIssues = async (map) => {
+  const tmp = await writeTemp(ISSUES, JSON.stringify(map, null, 2));
+  await rename(tmp, ISSUES);
+};
+
+const clip = (line) =>
+  line.length > ISSUE_LINE_MAX ? `${line.slice(0, ISSUE_LINE_MAX)}…` : line;
+
+const tail = (items) =>
+  items.length === 0
+    ? "none"
+    : [
+        ...(items.length > ISSUE_LINES_MAX
+          ? [`… ${items.length - ISSUE_LINES_MAX} earlier lines`]
+          : []),
+        ...items.slice(-ISSUE_LINES_MAX).map(clip),
+      ].join("\n");
+
+const pathOf = (url) => {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname + parsed.search;
+  } catch {
+    return url;
+  }
+};
+
+const recordingLink = (base) =>
+  PUBLIC_URL
+    ? `${PUBLIC_URL}#${base}`
+    : `\`${base}.json\` in the endpoint folder`;
+
+const issueTitle = (report) => {
+  const [line] = report.trigger.message.split("\n");
+  const clean = line.trim() || report.trigger.kind;
+  return clean.length > ISSUE_TITLE_MAX
+    ? `${clean.slice(0, ISSUE_TITLE_MAX - 1)}…`
+    : clean;
+};
+
+// one backtick longer than any run inside, so the text cannot close it
+const fence = (text, lang = "") => {
+  const longest = Math.max(
+    0,
+    ...(text.match(/`+/g) ?? []).map((run) => run.length),
+  );
+  const ticks = "`".repeat(Math.max(3, longest + 1));
+  return `${ticks}${lang}\n${text}\n${ticks}`;
+};
+
+const issueBody = (report, base) => {
+  const { context, trigger } = report;
+  const head = [
+    `**Page:** ${context.url}`,
+    `**When:** ${new Date(report.createdAt).toISOString()}`,
+    `**Browser:** ${context.userAgent}`,
+    `**Recording:** ${recordingLink(base)}`,
+    "",
+    "## Steps",
+    report.stepsMarkdown || "none",
+    "",
+    "## Error",
+    fence(trigger.error?.stack || trigger.message),
+  ].join("\n");
+  const logs = [
+    "## Console",
+    fence(
+      tail(report.console.map((entry) => `${entry.level}: ${entry.message}`)),
+    ),
+    "",
+    "## Network",
+    fence(
+      tail(
+        report.network.map(
+          (entry) =>
+            `${entry.method} ${pathOf(entry.url)} ${entry.status ?? entry.error ?? "pending"}${entry.durationMs === undefined ? "" : ` (${entry.durationMs} ms)`}`,
+        ),
+      ),
+    ),
+  ].join("\n");
+  const test = [
+    "<details><summary>Playwright test</summary>",
+    "",
+    fence(report.test, "ts"),
+    "",
+    "</details>",
+  ].join("\n");
+  const foot = `<!-- rewindbug fingerprint: ${report.fingerprint} -->`;
+  // the limit is met by dropping the logs first, then the test
+  for (const parts of [
+    [head, logs, test],
+    [head, test],
+    [
+      head,
+      "_Console, network and the test were cut: the issue would be too long._",
+    ],
+  ]) {
+    const body = [...parts, "", foot].join("\n\n");
+    if (body.length <= ISSUE_BODY_MAX) return body;
+  }
+  return [head.slice(0, ISSUE_BODY_MAX - foot.length - 2), foot].join("\n\n");
+};
+
+const repeatComment = (report, base) =>
+  [
+    `Seen again at ${new Date(report.createdAt).toISOString()} on ${report.context.url}, ${report.steps.length} steps.`,
+    `**Recording:** ${recordingLink(base)}`,
+  ].join("\n");
+
+const github = async (path, body) => {
+  const response = await fetch(`${GITHUB_API}${path}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${GITHUB_TOKEN}`,
+      accept: "application/vnd.github+json",
+      "content-type": "application/json",
+      "x-github-api-version": "2022-11-28",
+      "user-agent": "rewindbug-endpoint",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`github answered ${response.status}`);
+  return response.json();
+};
+
+// a report id is remembered only once GitHub took it, so the SDK sending the
+// same report again after a GitHub failure still gets its issue
+const remember = (entry, id) => {
+  const ids = Array.isArray(entry.ids) ? entry.ids : [];
+  entry.ids = [...ids, id].slice(-ISSUE_IDS_MAX);
+};
+
+const notifyGithub = async (report, base) => {
+  const issues = await readIssues();
+  if (issues === null) return;
+  const known = issues[report.fingerprint];
+  if (isObject(known) && known.ids?.includes(report.id)) return;
+  if (isObject(known) && Number.isSafeInteger(known.number)) {
+    await github(`/repos/${GITHUB_REPO}/issues/${known.number}/comments`, {
+      body: repeatComment(report, base),
+    });
+    remember(known, report.id);
+    await writeIssues(issues);
+    log(`commented on issue #${known.number} for ${report.id}`);
+    return;
+  }
+  const issue = await github(`/repos/${GITHUB_REPO}/issues`, {
+    title: issueTitle(report),
+    body: issueBody(report, base),
+    labels: GITHUB_LABELS,
+  });
+  const entry = {
+    number: issue.number,
+    ...(HTTPS.test(issue.html_url ?? "") ? { url: issue.html_url } : {}),
+    createdAt: Date.now(),
+  };
+  remember(entry, report.id);
+  issues[report.fingerprint] = entry;
+  await writeIssues(issues);
+  log(`opened issue #${issue.number} for ${report.id}`);
+};
+
+const view = async (response, rest) => {
+  if (rest === "") {
+    const page = await readFile(VIEWER).catch(() => null);
+    if (page === null) {
+      log(
+        `cannot read ${VIEWER.pathname}: keep viewer.html next to server.mjs`,
+      );
+      return send(response, 404, "text/plain", "viewer.html is missing");
+    }
+    return send(response, 200, "text/html; charset=utf-8", page);
+  }
+  if (rest === "/list") {
+    return send(
+      response,
+      200,
+      "application/json",
+      JSON.stringify(await list()),
+    );
+  }
+  const name =
+    rest.startsWith("/") && rest.endsWith(".json")
+      ? rest.slice(1, -".json".length)
+      : "";
+  if (!NAME.test(name)) return send(response, 404, "text/plain", "");
+  const report = await readFile(join(REPORTS, `${name}.json`)).catch(
+    () => null,
+  );
+  if (report === null) return send(response, 404, "text/plain", "");
+  return send(response, 200, "application/json", report);
+};
+
 // on loopback a page from another site could reach the server through DNS
 // rebinding: only our own Host names pass
 const hostAllowed = (header, port) =>
@@ -251,7 +564,14 @@ const server = createServer(
     try {
       if (!hostAllowed(request.headers.host, server.address().port))
         return respond(response, 421);
-      if (!timingSafeEqual(digest(request.url ?? ""), expected)) {
+      const url = request.url ?? "";
+      if (
+        VIEWABLE &&
+        request.method === "GET" &&
+        under(url, VIEW_PATH, expectedView)
+      )
+        return await view(response, url.slice(VIEW_PATH.length));
+      if (!timingSafeEqual(digest(url), expected)) {
         response.writeHead(404).end();
         return;
       }
@@ -280,8 +600,30 @@ const server = createServer(
   },
 );
 
-if (TOKEN && !TOKEN_CHARS.test(TOKEN)) {
-  log("REWINDBUG_TOKEN may hold only letters, digits and . _ ~ -");
+for (const [name, value] of [
+  ["REWINDBUG_TOKEN", TOKEN],
+  ["REWINDBUG_VIEW_TOKEN", VIEW_TOKEN],
+]) {
+  if (value && !TOKEN_CHARS.test(value)) {
+    log(`${name} may hold only letters, digits and . _ ~ -`);
+    process.exit(1);
+  }
+}
+if (VIEW_TOKEN && VIEW_TOKEN === TOKEN) {
+  log(
+    "REWINDBUG_VIEW_TOKEN must differ from REWINDBUG_TOKEN, which the app's code shows to everyone",
+  );
+  process.exit(1);
+}
+
+if (GITHUB_REPO && !REPO_NAME.test(GITHUB_REPO)) {
+  log("REWINDBUG_GITHUB_REPO must look like owner/name");
+  process.exit(1);
+}
+if (GITHUB_REPO && !GITHUB_TOKEN) {
+  log(
+    "REWINDBUG_GITHUB_TOKEN is needed to open issues in REWINDBUG_GITHUB_REPO",
+  );
   process.exit(1);
 }
 
@@ -302,8 +644,18 @@ server.listen(PORT, HOST, () => {
   const shown = TOKEN ? PATH.replace(TOKEN, "<REWINDBUG_TOKEN>") : PATH;
   process.stdout.write(`listening on http://${HOST}:${port}${shown}\n`);
   log(`reports folder ${REPORTS}`);
+  log(
+    VIEWABLE
+      ? `viewer on http://${HOST}:${port}${VIEW_TOKEN ? "/view/<REWINDBUG_VIEW_TOKEN>" : VIEW_PATH}`
+      : "viewer off: set REWINDBUG_VIEW_TOKEN to read reports beyond loopback",
+  );
+  if (GITHUB_REPO) log(`new bugs go to github.com/${GITHUB_REPO}/issues`);
 });
 
-const shutdown = () => server.close(() => process.exit(0));
+const shutdown = () => {
+  if (githubPending > 0)
+    log(`stopping with ${githubPending} reports not yet sent to GitHub`);
+  server.close(() => process.exit(0));
+};
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

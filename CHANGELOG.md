@@ -12,6 +12,12 @@ First working release. `0.0.1` was a name placeholder.
 - Options for sampling (`sampleRate`), editing or dropping a report (`beforeSend`), tags, custom triggers and URL filters, and a `debug` mode that says why `init` did not start.
 - One-file build with rrweb inside for pages without a bundler: `rewindbug/browser`.
 
+### examples/endpoint
+
+- One Node file receives and stores reports in the layout `rewindbug-mcp` reads; a Docker image.
+- `/view` plays the recordings with steps, test, console and network; beyond loopback it needs a view token of its own, separate from the write token in the app's code.
+- With `REWINDBUG_GITHUB_REPO` and `REWINDBUG_GITHUB_TOKEN`, every new bug becomes a GitHub issue and a repeat a comment on it.
+
 ### rewindbug-mcp
 
 - Receives reports on `127.0.0.1` with a token in the path and stores them in `.rewindbug/reports/`.
