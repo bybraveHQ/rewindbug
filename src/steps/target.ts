@@ -89,27 +89,56 @@ const textWithout = (node: Node, skip: Element): string => {
   return text;
 };
 
-const labelText = (element: Element): string | undefined => {
-  const labels = (element as HTMLInputElement).labels;
-  const label = labels?.[0];
-  return label ? textWithout(label, element) : undefined;
+// text that holds masked content gives no name at all: a name without the
+// masked part would not match the element's accessible name, and with it
+// the secret would reach the steps, the test and the tracker
+const hidesMasked = (node: Element, maskSelector: string): boolean => {
+  try {
+    return (
+      isMasked(node, maskSelector) ||
+      node.querySelector(
+        maskSelector ? `${BLOCK_CLASS}, ${maskSelector}` : BLOCK_CLASS,
+      ) !== null
+    );
+  } catch {
+    return true;
+  }
 };
 
-const labelledBy = (element: Element): string | undefined => {
+const labelText = (
+  element: Element,
+  maskSelector: string,
+): string | undefined => {
+  const labels = (element as HTMLInputElement).labels;
+  const label = labels?.[0];
+  return label && !hidesMasked(label, maskSelector)
+    ? textWithout(label, element)
+    : undefined;
+};
+
+const labelledBy = (
+  element: Element,
+  maskSelector: string,
+): string | undefined => {
   const ids = element.getAttribute("aria-labelledby")?.trim();
   if (!ids) return undefined;
-  return ids
+  const targets = ids
     .split(/\s+/)
-    .map((id) => element.ownerDocument.getElementById(id)?.textContent ?? "")
-    .join(" ");
+    .map((id) => element.ownerDocument.getElementById(id));
+  return targets.some((target) => target && hidesMasked(target, maskSelector))
+    ? undefined
+    : targets.map((target) => target?.textContent ?? "").join(" ");
 };
 
 // the part of the accessible name Playwright's getByLabel matches
-const labelName = (element: Element): string | undefined => {
+const labelName = (
+  element: Element,
+  maskSelector: string,
+): string | undefined => {
   for (const value of [
-    labelledBy(element),
+    labelledBy(element, maskSelector),
     element.getAttribute("aria-label"),
-    labelText(element),
+    labelText(element, maskSelector),
   ]) {
     const name = value ? collapse(value).slice(0, MAX_NAME_LENGTH) : "";
     if (name) return name;
@@ -126,15 +155,17 @@ export const nameOf = (
   if (isMasked(element, maskSelector)) return undefined;
   // accessible-name order, so Playwright's getByRole finds the same element
   const sources = [
-    () => labelledBy(element),
+    () => labelledBy(element, maskSelector),
     () => element.getAttribute("aria-label"),
-    () => labelText(element),
+    () => labelText(element, maskSelector),
     () =>
       element instanceof HTMLInputElement && BUTTON_INPUTS.has(element.type)
         ? element.value
         : undefined,
     () =>
-      !isTextField(element) && element.matches(NAMED_BY_TEXT)
+      !isTextField(element) &&
+      element.matches(NAMED_BY_TEXT) &&
+      !hidesMasked(element, maskSelector)
         ? element.textContent
         : undefined,
     () => element.getAttribute("alt"),
@@ -239,7 +270,7 @@ export const targetOf = (
     if (name) target.name = name;
     // a field with no role, a password among them, is found by its label;
     // nth then counts the fields with the same label
-    if (!testId && !role && name && labelName(element) === name)
+    if (!testId && !role && name && labelName(element, maskSelector) === name)
       target.label = true;
     // without a test id, a role with a name or a label the test falls back
     // to css: then nth counts the css matches
@@ -252,7 +283,7 @@ export const targetOf = (
               [...document.querySelectorAll(LABELLED)].filter(
                 (candidate) =>
                   !isMasked(candidate, maskSelector) &&
-                  labelName(candidate) === name,
+                  labelName(candidate, maskSelector) === name,
               ),
             )
           : target.unique

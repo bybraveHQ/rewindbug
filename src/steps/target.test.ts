@@ -225,3 +225,37 @@ describe("fields found by their label", () => {
     expect(targetOf(second, "")).toMatchObject({ label: true, nth: 1 });
   });
 });
+
+describe("masked text never becomes a name", () => {
+  test("a link or button holding masked text has no name, only css", () => {
+    html(`
+      <a href="/keys/1"><code class="secret">ghp_abc123</code> key</a>
+      <button><span class="rb-block">sk_live_42</span> copy</button>
+    `);
+    const link = targetOf($("a"), ".secret");
+    const button = targetOf($("button"), "");
+    expect(link).not.toHaveProperty("name");
+    expect(button).not.toHaveProperty("name");
+    expect(JSON.stringify([link, button])).not.toMatch(/ghp_abc123|sk_live_42/);
+    expect(link?.css).toBeTruthy();
+  });
+
+  test("a label or aria-labelledby holding masked text names nothing", () => {
+    html(`
+      <label>Token <b class="secret">tok_9</b> <input id="a"></label>
+      <span id="l1">Key <i class="rb-block">key_7</i></span>
+      <input id="b" aria-labelledby="l1" placeholder="Paste here">
+    `);
+    const byLabel = targetOf($("#a"), ".secret");
+    const byIds = targetOf($("#b"), "");
+    expect(JSON.stringify([byLabel, byIds])).not.toMatch(/tok_9|key_7/);
+    expect(byLabel).not.toHaveProperty("label");
+    // a later source without masked text still names the field
+    expect(byIds).toMatchObject({ name: "Paste here" });
+  });
+
+  test("text without masked content still names the element", () => {
+    html('<a href="/keys">Show <span class="other">keys</span></a>');
+    expect(targetOf($("a"), ".secret")).toMatchObject({ name: "Show keys" });
+  });
+});
