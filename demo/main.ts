@@ -130,13 +130,23 @@ const showReport = (report: Report) => {
   byId("console").textContent = lines(
     report.console.map((entry) => `${entry.level}: ${entry.message}`),
   );
+  // bodies are in the report only for urls in bodyAllowlist
   byId("network").textContent = lines(
-    report.network.map(
-      (entry) =>
-        `${entry.method} ${pathOf(entry.url)} ${entry.status ?? entry.error ?? "pending"}`,
+    report.network.map((entry) =>
+      [
+        `${entry.method} ${pathOf(entry.url)} ${entry.status ?? entry.error ?? "pending"}${entry.durationMs === undefined ? "" : ` (${entry.durationMs} ms)`}`,
+        entry.requestBody === undefined ? "" : `  sent: ${entry.requestBody}`,
+        entry.responseBody === undefined
+          ? ""
+          : `  received: ${entry.responseBody}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
     ),
   );
   const link = byId<HTMLAnchorElement>("download");
+  // the same name the receivers use: time of the report, then its id
+  link.download = `${new Date(report.createdAt).toISOString().replace(/[-:.]/g, "")}-${report.id}.json`;
   URL.revokeObjectURL(link.href);
   link.href = URL.createObjectURL(
     new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }),
@@ -181,9 +191,11 @@ const start = async () => {
   }
   // console.error is off as a trigger by default: libraries are noisy there.
   // Here it is the bug
+  // bodies are off by default; the demo's own api has no secrets in them
   init({
     endpoint: new URL("./report", location.href).href,
     consoleErrorTrigger: true,
+    bodyAllowlist: [new URL("./api", location.href).href],
   });
   await loadCart();
   byId("checkout").addEventListener("click", () => go(CHECKOUT));

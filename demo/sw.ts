@@ -8,11 +8,18 @@ declare const self: ServiceWorkerGlobalScope;
 
 const GZIP_MAGIC = [0x1f, 0x8b];
 
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), {
+// content-length is set explicitly: a response built here has none, and
+// the sdk keeps a response body only when the header says how long it is
+const json = (status: number, body: unknown) => {
+  const text = JSON.stringify(body);
+  return new Response(text, {
     status,
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "content-length": String(new TextEncoder().encode(text).length),
+    },
   });
+};
 
 const text = async (request: Request): Promise<string> => {
   const raw = new Uint8Array(await request.arrayBuffer());
