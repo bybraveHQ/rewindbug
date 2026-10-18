@@ -1,6 +1,6 @@
 {
   "name": "rewindbug",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Rewind the last seconds before a browser error into a ready bug report: steps, replay, console, network, Playwright test. No backend.",
   "license": "MIT",
   "funding": "https://ko-fi.com/bybrave",
@@ -14,6 +14,14 @@
     "./browser": {
       "types": "./dist/index.d.ts",
       "import": "./dist/rewindbug.browser.js"
+    },
+    "./download": {
+      "types": "./dist/download.d.ts",
+      "import": "./dist/download.js"
+    },
+    "./download/browser": {
+      "types": "./dist/download.d.ts",
+      "import": "./dist/download.browser.js"
     },
     "./playwright": {
       "import": {

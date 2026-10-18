@@ -11,5 +11,18 @@
     "path": "dist/rewindbug.browser.js",
     "limit": "40 kB",
     "gzip": true
+  },
+  {
+    "name": "download build with rrweb, before the player loads",
+    "path": "dist/download.browser.js",
+    "entry": ["download.browser"],
+    "limit": "41 kB",
+    "gzip": true
+  },
+  {
+    "name": "download build with the player",
+    "path": "dist/download.browser.js",
+    "limit": "105 kB",
+    "gzip": true
   }
 ]

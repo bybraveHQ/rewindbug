@@ -17,9 +17,9 @@ export const embedJson = (value: unknown): string =>
 
 export type Player = { script: string; style: string };
 
-// one report as a page of its own, for a test attachment: the report, the
-// rrweb player and its styles are all inline, so the file opens offline and
-// fetches nothing; every report field goes in through textContent
+// one report as a page of its own, a test attachment or a download: the
+// report, the rrweb player and its styles are all inline, so the file opens
+// offline and fetches nothing; every report field goes in through textContent
 export const reportPage = (
   report: Report,
   title: string,

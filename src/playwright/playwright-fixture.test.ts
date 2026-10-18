@@ -6,7 +6,7 @@ import {
   looksLikeReport,
   uniqueReports,
 } from "./parts.ts";
-import { embedJson, reportPage } from "./view.ts";
+import { embedJson, reportPage } from "../report/page.ts";
 
 const report = (fingerprint: string, message = "boom") =>
   ({

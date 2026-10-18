@@ -16,7 +16,7 @@ import {
   uniqueReports,
   type RewindbugOptions,
 } from "./parts.ts";
-import { reportPage, type Player } from "./view.ts";
+import { reportPage } from "../report/page.ts";
 
 export { expect } from "@playwright/test";
 export type { RewindbugOptions };
@@ -28,21 +28,13 @@ const MAX_TITLE_LENGTH = 200;
 // a page in a loop of errors must not fill the disk with attachments
 const MAX_REPORTS = 20;
 
-// the browser build and the player ship next to this module in dist
-const dist = new Map<string, string>();
-const shipped = (name: string): string => {
-  let text = dist.get(name);
-  if (text === undefined) {
-    text = readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
-    dist.set(name, text);
-  }
-  return text;
-};
-const browserBuild = () => shipped("rewindbug.global.js");
-const player = (): Player => ({
-  script: shipped("rrweb-replay.js"),
-  style: shipped("rrweb-replay.css"),
-});
+// the browser build ships next to this module in dist
+let browserBuild: string | undefined;
+const shipped = (): string =>
+  (browserBuild ??= readFileSync(
+    new URL("./rewindbug.global.js", import.meta.url),
+    "utf8",
+  ));
 
 const withTimeout = <T>(work: Promise<T>): Promise<T | undefined> =>
   Promise.race([work, delay(PAGE_TIMEOUT_MS, undefined, { ref: false })]);
@@ -76,13 +68,14 @@ const captureFailure = async (
 
 // files, not bodies: terminal reporters print a body inline and a path as is
 const attach = async (testInfo: TestInfo, reports: Report[]) => {
+  const { player } = await import("../report/player.ts");
   for (const [index, report] of reports.entries()) {
     const name = `rewindbug-${index + 1}`;
     const [headline = ""] = report.trigger.message.split("\n");
     const title = `${testInfo.title}: ${headline}`.slice(0, MAX_TITLE_LENGTH);
     const html = testInfo.outputPath(`${name}.html`);
     const json = testInfo.outputPath(`${name}.json`);
-    await writeFile(html, reportPage(report, title, player()));
+    await writeFile(html, reportPage(report, title, player));
     await writeFile(json, JSON.stringify(report, null, 2));
     await testInfo.attach(`${name}.html`, {
       path: html,
@@ -109,7 +102,7 @@ export const test = base.extend<Fixtures>({
           reports.push(report);
       });
       await context.addInitScript({
-        content: initScript(browserBuild(), rewindbug),
+        content: initScript(shipped(), rewindbug),
       });
       await use(undefined);
       const failed = testInfo.status !== testInfo.expectedStatus;

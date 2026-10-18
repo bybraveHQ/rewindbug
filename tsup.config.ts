@@ -1,17 +1,32 @@
-import { copyFile, readFile, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { defineConfig, type Options } from "tsup";
 import { sdkDefine } from "./define.config.ts";
 
-// the player of the recorder's own version goes into the package: a test
-// attachment plays offline, with nothing fetched at view time
+// the player of the recorder's own version goes into the package as one
+// module, dist/player.js: a test attachment or a downloaded report plays
+// offline, with nothing fetched at view time
 const PLAYER = "node_modules/@rrweb/replay/dist/";
-const bundlePlayer = async () => {
-  const script = await readFile(`${PLAYER}replay.umd.min.cjs`, "utf8");
-  await writeFile(
-    "dist/rrweb-replay.js",
-    script.replace(/^\/\/# sourceMappingURL=.*$/gm, ""),
-  );
-  await copyFile(`${PLAYER}style.css`, "dist/rrweb-replay.css");
+const playerDefine = {
+  __RRWEB_PLAYER_SCRIPT__: JSON.stringify(
+    readFileSync(`${PLAYER}replay.umd.min.cjs`, "utf8").replace(
+      /^\/\/# sourceMappingURL=.*$/gm,
+      "",
+    ),
+  ),
+  __RRWEB_PLAYER_STYLE__: JSON.stringify(
+    readFileSync(`${PLAYER}style.css`, "utf8"),
+  ),
+};
+// the builds that use the player import that one module next to them
+// instead of bundling a copy each
+const externalPlayer: NonNullable<Options["esbuildPlugins"]>[number] = {
+  name: "external-player",
+  setup(build) {
+    build.onResolve({ filter: /[\\/]player\.ts$/ }, () => ({
+      path: "./player.js",
+      external: true,
+    }));
+  },
 };
 
 const shared: Options = {
@@ -49,6 +64,30 @@ export default defineConfig([
     noExternal: [/.*/],
   },
   {
+    ...shared,
+    entry: { player: "src/report/player.ts" },
+    minify: true,
+    sourcemap: false,
+    define: playerDefine,
+  },
+  // reports as files, for a page with no server
+  {
+    ...shared,
+    entry: { download: "src/download/index.ts" },
+    dts: true,
+    // its map would repeat the core's and double the package
+    sourcemap: false,
+    esbuildPlugins: [externalPlayer],
+  },
+  {
+    ...shared,
+    entry: { "download.browser": "src/download/index.ts" },
+    minify: true,
+    sourcemap: false,
+    noExternal: [/.*/],
+    esbuildPlugins: [externalPlayer],
+  },
+  {
     entry: { playwright: "src/playwright/index.ts" },
     // Playwright compiles specs to CommonJS unless the project is a module
     format: ["esm", "cjs"],
@@ -57,6 +96,6 @@ export default defineConfig([
     platform: "node",
     dts: true,
     external: ["@playwright/test"],
-    onSuccess: bundlePlayer,
+    esbuildPlugins: [externalPlayer],
   },
 ]);
