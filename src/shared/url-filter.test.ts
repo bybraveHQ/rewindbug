@@ -35,8 +35,22 @@ describe("defaultUrlFilter", () => {
     );
   });
 
-  test("returns unparsable input unchanged", () => {
+  test("masks secrets by pattern in a url the parser refuses", () => {
     expect(defaultUrlFilter("http://[bad")).toBe("http://[bad");
+    expect(
+      defaultUrlFilter(
+        "wss://rt.example.com:undefined/socket?token=abc&room=1",
+      ),
+    ).toBe("wss://rt.example.com:undefined/socket?token=*&room=1");
+    expect(
+      defaultUrlFilter("https://bob:pw@[bad/x?page=2&api_key=k#auth=t"),
+    ).toBe("https://[bad/x?page=2&api_key=*#auth=*");
+  });
+
+  test("masks a refused url quoted in an error message", () => {
+    const message =
+      "Failed to construct 'WebSocket': The URL 'wss://rt.example.com:undefined/s?jwt=eyJ' is invalid.";
+    expect(filterUrlsInText(message, defaultUrlFilter)).not.toContain("eyJ");
   });
 });
 

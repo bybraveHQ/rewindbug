@@ -8,6 +8,9 @@ const MASK = "*";
 const URL_IN_TEXT = /(?:https?|wss?):\/\/[^\s"'<>\\]+/gi;
 const LINE_COL_TAIL = /(:\d+){1,2}$/;
 const FALLBACK_BASE = "http://localhost/";
+// for a url the parser refuses: browsers quote exactly such urls in errors
+const USERINFO = /^([a-z][\w+.-]*:\/\/)[^/?#@\s]*@/i;
+const PAIR = /([?&#;])([^=&#?;\s]+)=([^&#;\s]*)/g;
 
 export const pageBase = (): string =>
   globalThis.document?.baseURI ?? globalThis.location?.href ?? FALLBACK_BASE;
@@ -22,7 +25,13 @@ export const resolveUrl = (raw: string): URL | null => {
 
 export const defaultUrlFilter: UrlFilter = (raw) => {
   const url = resolveUrl(raw);
-  if (!url) return raw;
+  // fails closed: secrets are masked by pattern when the parser gives up
+  if (!url)
+    return raw
+      .replace(USERINFO, "$1")
+      .replace(PAIR, (pair, lead: string, name: string) =>
+        SECRET_PARAM.test(name) ? `${lead}${name}=${MASK}` : pair,
+      );
   url.username = "";
   url.password = "";
   for (const name of new Set(url.searchParams.keys())) {
