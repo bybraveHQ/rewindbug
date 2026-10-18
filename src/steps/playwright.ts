@@ -205,12 +205,16 @@ const waitFor = (entry: NetworkEntry): string =>
 const ASSERT_RESPONSE = "expect((await failing).ok()).toBe(true);";
 
 const startPath = (raw: string): string => {
+  let start = raw;
   try {
     const url = new URL(raw);
-    return url.pathname + url.search + url.hash;
+    start = url.pathname + url.search + url.hash;
   } catch {
-    return raw;
+    // kept as recorded
   }
+  // a path starting with // names another host to at(); /. keeps it on the
+  // base origin and the browser drops the dot
+  return start.startsWith("//") ? `/.${start}` : start;
 };
 
 const origin = (raw: string): string => {

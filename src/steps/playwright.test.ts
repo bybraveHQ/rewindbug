@@ -71,6 +71,22 @@ describe("playwrightTest", () => {
     expect(query).toContain('await page.goto(at("/cart?step=2#pay"));');
   });
 
+  test("a start path beginning with // stays on the base origin", () => {
+    const code = playwrightTest(
+      source([], {
+        range: {
+          start: 0,
+          end: 1,
+          startUrl: "https://app.example//evil.example/login",
+        },
+      }),
+    );
+    expect(code).toContain('await page.goto(at("/.//evil.example/login"));');
+    expect(new URL("/.//evil.example/login", "https://app.example").host).toBe(
+      "app.example",
+    );
+  });
+
   test("picks the locator tier: test id, role and name, css", () => {
     const lines = body(
       source([
