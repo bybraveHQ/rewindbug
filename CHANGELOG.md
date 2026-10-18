@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 — 2026-10-18
+
+### rewindbug
+
+- README on npm: the demo GIF. No code changes.
+
 ## 0.1.1 — 2026-10-18
 
 ### rewindbug
