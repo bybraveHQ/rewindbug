@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3 — 2026-10-18
+
+### rewindbug
+
+- Next.js `redirect()` and `notFound()` signals (`NEXT_REDIRECT`, `NEXT_NOT_FOUND`, `NEXT_HTTP_ERROR_FALLBACK`) are no longer reported as errors.
+- Fingerprints treat long letter-and-digit path segments (cuid, ObjectId, ULID, nanoid) as ids, so the same error on different records is one report.
+- Steps skip React 19 `useId` ids (`_r_1_`, `«r1»`) and the library ids built on them (Base UI, Radix, Headless UI).
+
 ## 0.1.2 — 2026-10-18
 
 ### rewindbug
