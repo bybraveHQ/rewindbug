@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 — 2026-10-18
+
+### rewindbug
+
+- `rewindbug/playwright`: a `test` for your own Playwright suite. A failed test gets the report of its failure and of each page error before it, attached as an HTML page with the recording and as JSON. The page carries the rrweb player, so it opens offline and loads nothing. No network and no endpoint: reports reach the test runner directly, so a strict Content Security Policy does not get in the way. Works from ES module and CommonJS projects, `@playwright/test` 1.40 or newer.
+
 ## 0.1.3 — 2026-10-18
 
 ### rewindbug
