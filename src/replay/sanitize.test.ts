@@ -144,6 +144,65 @@ describe("urls in the recorded DOM", () => {
     expect(text.match(/token=\*/g)).toHaveLength(4);
   });
 
+  it("filters urls in every css event the CSSOM produces", () => {
+    const css = `url(${page})`;
+    const events: RecordedEvent[] = [
+      {
+        type: 3,
+        timestamp: 1,
+        data: { source: 8, id: 4, replace: `.a { background: ${css} }` },
+      },
+      {
+        type: 3,
+        timestamp: 1,
+        data: { source: 8, id: 4, replaceSync: `.a { background: ${css} }` },
+      },
+      {
+        type: 3,
+        timestamp: 1,
+        data: {
+          source: 13,
+          id: 4,
+          index: [0],
+          set: { property: "background", value: css, priority: "" },
+        },
+      },
+      {
+        type: 3,
+        timestamp: 1,
+        data: {
+          source: 15,
+          id: 1,
+          styleIds: [5],
+          styles: [
+            { styleId: 5, rules: [{ rule: `.a { background: ${css} }` }] },
+          ],
+        },
+      },
+      {
+        type: 3,
+        timestamp: 1,
+        data: {
+          source: 0,
+          adds: [],
+          removes: [],
+          texts: [],
+          attributes: [
+            {
+              id: 2,
+              attributes: { style: { background: [css, "important"] } },
+            },
+          ],
+        },
+      },
+    ];
+    for (const event of events) sanitizeEvent(event, defaultUrlFilter);
+    const text = JSON.stringify(events);
+    expect(text).not.toContain("token=S");
+    expect(text.match(/token=\*/g)).toHaveLength(events.length);
+    expect(text).toContain('"important"');
+  });
+
   it("filters url attributes in added nodes and attribute changes", () => {
     const event: RecordedEvent = {
       type: 3,

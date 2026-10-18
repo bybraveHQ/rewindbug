@@ -20,7 +20,9 @@ const URL_ATTRIBUTES = new Set([
 // text with absolute urls inside: a source list, inline css with url(...)
 const URLS_IN_TEXT_ATTRIBUTES = new Set(["srcset", "style", "_cssText"]);
 const MUTATION_SOURCE = 0;
-const STYLE_SHEET_RULE_SOURCE = 8;
+// css the page sets through the CSSOM: inserted rules and replace(),
+// setProperty(), adopted stylesheets
+const CSS_SOURCES = new Set([8, 13, 15]);
 const MAX_URL_LENGTH = 2000;
 
 type MetaData = { href?: unknown };
@@ -40,9 +42,14 @@ const filterAttributes = (
     // a style change comes as an object of properties
     if (name === "style" && value && typeof value === "object") {
       const style = value as Record<string, unknown>;
-      for (const property in style)
-        if (typeof style[property] === "string")
-          style[property] = filterUrlsInText(style[property] as string, filter);
+      for (const property in style) {
+        const css = style[property];
+        if (typeof css === "string")
+          style[property] = filterUrlsInText(css, filter);
+        // an !important value comes as [value, priority]
+        else if (Array.isArray(css) && typeof css[0] === "string")
+          css[0] = filterUrlsInText(css[0], filter);
+      }
       continue;
     }
     if (typeof value !== "string") continue;
@@ -65,6 +72,22 @@ const filterTree = (root: unknown, filter: UrlFilter): void => {
     if (Array.isArray(node.childNodes)) stack.push(...node.childNodes);
   }
 };
+// every string of a css event: its fields differ by source and rrweb version
+const filterStrings = (root: unknown, filter: UrlFilter): void => {
+  const stack = [root];
+  while (stack.length > 0) {
+    const value = stack.pop();
+    if (!value || typeof value !== "object") continue;
+    const record = value as Record<string, unknown>;
+    for (const key in record) {
+      const item = record[key];
+      if (typeof item === "string")
+        record[key] = filterUrlsInText(item, filter);
+      else stack.push(item);
+    }
+  }
+};
+
 type MutationData = {
   source?: unknown;
   adds?: unknown[];
@@ -84,13 +107,8 @@ export const sanitizeEvent = (
   }
   if (event.type === INCREMENTAL) {
     const data = event.data as MutationData | undefined;
-    // rules a css-in-js library inserts through the CSSOM
-    if (data?.source === STYLE_SHEET_RULE_SOURCE) {
-      for (const add of data.adds ?? []) {
-        const rule = add as { rule?: unknown } | undefined;
-        if (rule && typeof rule.rule === "string")
-          rule.rule = filterUrlsInText(rule.rule, filter);
-      }
+    if (CSS_SOURCES.has(data?.source as number)) {
+      filterStrings(data, filter);
       return;
     }
     if (data?.source !== MUTATION_SOURCE) return;

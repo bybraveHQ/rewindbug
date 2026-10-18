@@ -5,6 +5,12 @@
 ### rewindbug
 
 - `rewindbug/playwright`: a `test` for your own Playwright suite. A failed test gets the report of its failure and of each page error before it, attached as an HTML page with the recording and as JSON. The page carries the rrweb player, so it opens offline and loads nothing. No network and no endpoint: reports reach the test runner directly, so a strict Content Security Policy does not get in the way. Works from ES module and CommonJS projects, `@playwright/test` 1.40 or newer.
+- The recording masks secret URL parameters in every stylesheet change: `replace()` and `replaceSync()`, `setProperty()`, adopted stylesheets and `!important` style values went into the report unmasked before.
+- `defaultUrlFilter` fails closed: a URL the browser cannot parse, which is exactly the kind an error message quotes, has its secret parameters and `user:password@` masked by pattern instead of passing as is.
+
+### examples/endpoint
+
+- At most `REWINDBUG_GITHUB_MAX_PER_HOUR` GitHub issues and comments an hour, 20 by default: the write token is public, and reports with made-up fingerprints could otherwise open issues without end.
 
 ## 0.1.3 — 2026-10-18
 
