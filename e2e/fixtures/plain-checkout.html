@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <!-- no connections at all: the Playwright fixture must not need the network -->
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'unsafe-inline'; connect-src 'none'"
+  />
+  <title>Checkout</title>
+  <!-- no rewindbug here: the Playwright fixture brings it -->
+  <label>Coupon <input name="coupon" /></label>
+  <button id="apply">Apply</button>
+  <script>
+    document.getElementById("apply").addEventListener("click", () => {
+      const coupon = undefined;
+      coupon.code.trim();
+    });
+  </script>
+</html>

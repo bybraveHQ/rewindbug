@@ -126,17 +126,17 @@ Use an environment variable of your build instead if the test run should be told
 
 ### A page without a bundler
 
-Import the single-file build, rrweb included, about 35 kB gzip:
+Import the single-file build, rrweb included, about 36 kB gzip:
 
 ```html
 <script type="module">
-  import { init } from "https://cdn.jsdelivr.net/npm/rewindbug@0.1/dist/rewindbug.browser.js";
+  import { init } from "https://cdn.jsdelivr.net/npm/rewindbug@0.2/dist/rewindbug.browser.js";
 
   init({ endpoint: "https://bugs.example.com/report" });
 </script>
 ```
 
-For a first try, run [`examples/endpoint`](examples/endpoint/README.md) from a clone of this repo and use `http://127.0.0.1:7358/report`. `@0.1` is for a first try: pin an exact version such as `@0.1.0` in production, the script sees the whole page. With a Content Security Policy, allow the CDN in `script-src`. With a bundler the same file is `rewindbug/browser`, but plain `rewindbug` is better there: it shares `@rrweb/record` with anything else that uses it.
+For a first try, run [`examples/endpoint`](examples/endpoint/README.md) from a clone of this repo and use `http://127.0.0.1:7358/report`. `@0.2` is for a first try: pin an exact version such as `@0.2.0` in production, the script sees the whole page. With a Content Security Policy, allow the CDN in `script-src`. With a bundler the same file is `rewindbug/browser`, but plain `rewindbug` is better there: it shares `@rrweb/record` with anything else that uses it.
 
 ### With a coding agent
 
@@ -159,6 +159,52 @@ if (endpoint) init({ endpoint });
 Add `.rewindbug/` to your app's `.gitignore`: it holds the token and the reports.
 
 From then on the same question gets the newest bug: the steps, the trigger, the console, the network and the test, without the recording.
+
+### In your Playwright tests
+
+A failed end-to-end test gets the same report: the steps, the recording, the console and the network of the page it failed on. Nothing changes in the app, nothing is posted anywhere. Import `test` from `rewindbug/playwright` instead of `@playwright/test` (version 1.40 or newer):
+
+```ts
+import { expect, test } from "rewindbug/playwright";
+
+test("coupon is applied", async ({ page }) => {
+  await page.goto("/checkout");
+  await page.getByLabel("Coupon").fill("SAVE10");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByText("Coupon applied")).toBeVisible();
+});
+```
+
+Every page of the test runs rewindbug before its own scripts. When the test fails, the report of the failure and of each page error before it is attached to the test as `rewindbug-1.html` and `rewindbug-1.json`, then `rewindbug-2` and on: open the HTML from the Playwright HTML report or from the path the terminal prints. The page shows the recording, the steps and the rest of the report. It is one file of about 200 kB plus the report, with the rrweb player inside: it opens offline, from a downloaded CI artifact as well, and fetches nothing. A passing test gets nothing, even if the page threw.
+
+If your suite already has its own `test`, merge the two:
+
+```ts
+import { mergeTests } from "@playwright/test";
+import { test as rewindbug } from "rewindbug/playwright";
+import { test as app } from "./fixtures";
+
+export const test = mergeTests(app, rewindbug);
+```
+
+Options go into `use` in the config or `test.use()`:
+
+```ts
+// playwright.config.ts
+import { defineConfig } from "@playwright/test";
+import type { RewindbugOptions } from "rewindbug/playwright";
+
+export default defineConfig<{ rewindbug: RewindbugOptions }>({
+  use: {
+    rewindbug: {
+      attach: "always", // page errors on passing tests too
+      bufferSeconds: 60,
+    },
+  },
+});
+```
+
+`maskInputs`, `maskSelector` and `consoleErrorTrigger` work as in [Options](#options). Typed values stay masked in the test reports too: a report attached to a CI run is as private as one from a user.
 
 ### Next to Sentry
 
@@ -299,8 +345,8 @@ Measured with `pnpm bench` in a clone of this repo (`pnpm bench -- --report` for
 
 | What                        | Measured                                                                                                                                                                                           |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| bundle, core without rrweb  | 14.0 kB gzip (`size-limit`, budget 15 kB, checked in CI)                                                                                                                                           |
-| bundle with `@rrweb/record` | about 35 kB gzip: `dist/rewindbug.browser.js` (`size-limit` reports 35.3 kB), budget 40 kB, checked in CI                                                                                          |
+| bundle, core without rrweb  | 14.6 kB gzip (`size-limit`, budget 15 kB, checked in CI)                                                                                                                                           |
+| bundle with `@rrweb/record` | about 36 kB gzip: `dist/rewindbug.browser.js` (`size-limit` reports 36.5 kB), budget 40 kB, checked in CI                                                                                          |
 | rewindbug on top of rrweb   | no measurable INP or TBT and under 0.2 MB of heap on the canvas, form and SPA pages; the table page is over the element limit and records nothing                                                  |
 | rrweb recording itself      | about 16 ms of INP at 4× slowdown on an interaction that re-renders much of the DOM, so about 4–5 ms on a regular CPU; 1–3 MB of heap                                                              |
 | full DOM snapshot           | at the start of recording and every `bufferSeconds`, blocking the main thread for a time that grows with the DOM; `pnpm bench` does not measure it near the 25 000-element limit                   |
