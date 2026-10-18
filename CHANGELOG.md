@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 — 2026-10-18
+
+### rewindbug
+
+- Elements inside `rb-block` no longer count toward the 25 000-element limit and the mutation burst limit: rrweb does not record them. A page with a huge table keeps its recording when the table has the class `rb-block`.
+
 ## 0.2.0 — 2026-10-18
 
 ### rewindbug
