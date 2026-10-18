@@ -1,11 +1,18 @@
 export type UrlFilter = (url: string) => string;
 
+// a ; before the name: html-escaped text splits ?a=1&amp;token=S at & only
 const SECRET_PARAM =
-  /^(.*[_-])?(token|key|secret|pass(word)?|auth|session|code|sig(nature)?|jwt|otp)$/i;
+  /^(.*[_;-])?(token|key|secret|pass(word)?|auth|session|code|sig(nature)?|jwt|otp)$/i;
 const MASK = "*";
 // ws(s) too: realtime clients put tokens in the query of their socket url
-// parentheses may sit inside a url: one the url did not open is cut below
-const URL_IN_TEXT = /(?:https?|wss?):\/\/[^\s"'<>\\]+/gi;
+// parentheses may sit inside a url: one the url did not open is cut below;
+// an apostrophe too (Mary's.jpg), unless it closes a quote around the url
+const URL_IN_TEXT = /(?:https?|wss?):\/\/(?:[^\s"'<>\\]|'(?![\s),.;\]}]|$))+/gi;
+// css url(...) the page wrote relative or protocol-relative: rrweb keeps
+// such urls as written in CSSOM events and style changes
+const CSS_URL = /url\(\s*(['"]?)([^'"()\s]+)\1\s*\)/gi;
+// a scheme goes to the text filter, #id names an element of the page itself
+const NOT_RELATIVE = /^([a-z][\w+.-]*:|#)/i;
 const LINE_COL_TAIL = /(:\d+){1,2}$/;
 const FALLBACK_BASE = "http://localhost/";
 // for a url the parser refuses: browsers quote exactly such urls in errors
@@ -57,3 +64,8 @@ export const filterUrlsInText = (text: string, filter: UrlFilter): string =>
     const head = tail ? url.slice(0, -tail.length) : url;
     return filter(head) + tail + match.slice(end);
   });
+
+export const filterCssUrls = (css: string, filter: UrlFilter): string =>
+  css.replace(CSS_URL, (whole, quote: string, url: string) =>
+    NOT_RELATIVE.test(url) ? whole : `url(${quote}${filter(url)}${quote})`,
+  );

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { defaultUrlFilter, filterUrlsInText } from "./url-filter.ts";
+import {
+  defaultUrlFilter,
+  filterCssUrls,
+  filterUrlsInText,
+} from "./url-filter.ts";
 
 describe("defaultUrlFilter", () => {
   test("masks secret query params and keeps the rest", () => {
@@ -104,5 +108,54 @@ describe("filterUrlsInText", () => {
     expect(filterUrlsInText(text, defaultUrlFilter)).toBe(
       '{"m":"see \\"https://a.com/?token=*\\""}',
     );
+  });
+
+  test("an apostrophe in a path does not hide the query", () => {
+    expect(
+      filterUrlsInText(
+        "bg https://cdn.example/u/Mary's.jpg?Signature=S&Key-Pair-Id=K",
+        defaultUrlFilter,
+      ),
+    ).toBe("bg https://cdn.example/u/Mary's.jpg?Signature=*&Key-Pair-Id=K");
+  });
+
+  test("an apostrophe that closes a quote stays outside the url", () => {
+    expect(
+      filterUrlsInText(
+        "fetch('https://a.com/?token=S', opts) and 'https://a.com/?jwt=S'.",
+        defaultUrlFilter,
+      ),
+    ).toBe("fetch('https://a.com/?token=*', opts) and 'https://a.com/?jwt=*'.");
+    expect(
+      filterUrlsInText("url('https://a.com/i.png?sig=S')", defaultUrlFilter),
+    ).toBe("url('https://a.com/i.png?sig=*')");
+  });
+
+  test("masks a secret param in html-escaped text", () => {
+    expect(
+      filterUrlsInText("https://a.com/?a=1&amp;token=S", defaultUrlFilter),
+    ).not.toContain("=S");
+  });
+});
+
+describe("filterCssUrls", () => {
+  test("filters relative and protocol-relative urls", () => {
+    const out = filterCssUrls(
+      "url(/f?token=S) url('//cdn.example/x?sig=S') url(\"a.png\")",
+      defaultUrlFilter,
+    );
+    expect(out).not.toContain("=S");
+    expect(out).toContain("//cdn.example/x?sig=*')");
+    expect(out).toContain('a.png")');
+  });
+
+  test("leaves a reference to an element of the page as it is", () => {
+    const css = "fill: url(#grad); clip-path: url('#clip')";
+    expect(filterCssUrls(css, defaultUrlFilter)).toBe(css);
+  });
+
+  test("leaves urls with a scheme to the text filter", () => {
+    const css = "url(https://a.com/?token=S) url(data:image/png;base64,QQ)";
+    expect(filterCssUrls(css, defaultUrlFilter)).toBe(css);
   });
 });
