@@ -5,8 +5,9 @@ const FNV_PRIME = 0x01000193;
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const HEX_RUN = /[0-9a-f]{8,}/gi;
 const NUMBER = /\d+/g;
+// numbers, uuids and long letter-digit runs (cuid, ObjectId, ULID, nanoid)
 const ID_SEGMENT =
-  /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+  /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[a-z]*\d)(?=\d*[a-z])[0-9a-z]{16,})$/i;
 const FILE_HASH = /[.-][0-9a-f]{8,}(?=[.\-/]|$)/gi;
 const LINE_COL = /(:\d+){1,2}\)?$/;
 const V8_FRAME = /^at\s/;

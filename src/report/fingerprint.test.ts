@@ -52,6 +52,22 @@ describe("normalization", () => {
     ).toBe("/u/:id/items/:id/v2");
   });
 
+  test("path: cuid, ObjectId, ULID and nanoid become :id, slugs stay", () => {
+    for (const id of [
+      "cmvd525mp000206l8wgt699c0",
+      "507f1f77bcf86cd799439011",
+      "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "V1StGXR8Z5jdHi6BmyTx",
+    ])
+      expect(normalizePath(`/slots/${id}/summary`)).toBe("/slots/:id/summary");
+    for (const path of [
+      "/blog/how-to-ship-in-2026",
+      "/docs/authentication",
+      "/v2",
+    ])
+      expect(normalizePath(path)).toBe(path);
+  });
+
   test("first frame skips the message line and strips position, query and hashes", () => {
     const chrome =
       "TypeError: x is undefined\n    at load (https://a.example/app.3f2a1b9c.js?v=2:10:5)";
