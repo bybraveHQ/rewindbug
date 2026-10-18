@@ -17,11 +17,13 @@ export const embedJson = (value: unknown): string =>
 
 export type Player = { script: string; style: string };
 
-// one report as a page of its own, a test attachment or a download: the
-// report, the rrweb player and its styles are all inline, so the file opens
-// offline and fetches nothing; every report field goes in through textContent
+// reports as a page of their own, a test attachment or a download: the
+// reports, the rrweb player and its styles are all inline, so the file opens
+// offline and fetches nothing; every report field goes in through
+// textContent. With more than one, a list on top picks the report, the
+// newest first
 export const reportPage = (
-  report: Report,
+  reports: readonly Report[],
   title: string,
   player: Player,
 ): string => `<!doctype html>
@@ -42,12 +44,18 @@ export const reportPage = (
       pre { border: 1px solid var(--line); padding: 12px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
       .muted { color: var(--muted); }
       .error { color: var(--error); white-space: pre-wrap; word-break: break-word; }
+      #list { list-style: none; padding: 0; margin: 0 0 16px; border: 1px solid var(--line); }
+      #list button { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: none; padding: 8px 12px; cursor: pointer; color: inherit; }
+      #list li:last-child button { border-bottom: 0; }
+      #list button[aria-current="true"] { background: #8882; font-weight: 600; }
+      #list .when { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
       [hidden] { display: none !important; }
     </style>
     <style>${player.style}</style>
   </head>
   <body>
     <h1>${escapeHtml(title)}</h1>
+    <ul id="list" aria-label="Reports" hidden></ul>
     <p id="headline" class="error"></p>
     <div class="row">
       <label>Speed
@@ -72,11 +80,11 @@ export const reportPage = (
     <pre id="network"></pre>
     <h2>Context</h2>
     <pre id="context"></pre>
-    <script id="report" type="application/json">${embedJson(report)}</script>
+    <script id="reports" type="application/json">${embedJson(reports)}</script>
     <!-- @rrweb/replay, MIT, https://github.com/rrweb-io/rrweb -->
     <script>${player.script}</script>
     <script>
-      const report = JSON.parse(document.getElementById("report").textContent);
+      const reports = JSON.parse(document.getElementById("reports").textContent);
       const byId = (id) => document.getElementById(id);
       const text = (id, value) => (byId(id).textContent = value);
       const lines = (items) => (items.length ? items.join("\\n") : "none");
@@ -88,72 +96,99 @@ export const reportPage = (
           return url;
         }
       };
-      const c = report.context ?? {};
-      const limits = report.limits ?? {};
-      const sdk = report.sdk ?? {};
-      text("headline", report.trigger.kind + ": " + report.trigger.message);
-      text("steps", report.stepsMarkdown || "none");
-      text("test", report.test);
-      text("stack", report.trigger.error?.stack ?? report.trigger.message);
-      text("console", lines(report.console.map((e) => e.level + ": " + e.message)));
-      text(
-        "network",
-        lines(
-          report.network.map((e) =>
-            [
-              e.method + " " + pathOf(e.url) + " " + (e.status ?? e.error ?? "pending") +
-                (e.durationMs === undefined ? "" : " (" + e.durationMs + " ms)"),
-              e.requestBody === undefined ? "" : "  sent: " + e.requestBody,
-              e.responseBody === undefined ? "" : "  received: " + e.responseBody,
-            ]
-              .filter(Boolean)
-              .join("\\n"),
+      const clock = (t) => new Date(t).toTimeString().slice(0, 8);
+      const stage = byId("stage");
+      let player;
+      const show = (report) => {
+        const c = report.context ?? {};
+        const limits = report.limits ?? {};
+        const sdk = report.sdk ?? {};
+        text("headline", report.trigger.kind + ": " + report.trigger.message);
+        text("steps", report.stepsMarkdown || "none");
+        text("test", report.test);
+        text("stack", report.trigger.error?.stack ?? report.trigger.message);
+        text("console", lines(report.console.map((e) => e.level + ": " + e.message)));
+        text(
+          "network",
+          lines(
+            report.network.map((e) =>
+              [
+                e.method + " " + pathOf(e.url) + " " + (e.status ?? e.error ?? "pending") +
+                  (e.durationMs === undefined ? "" : " (" + e.durationMs + " ms)"),
+                e.requestBody === undefined ? "" : "  sent: " + e.requestBody,
+                e.responseBody === undefined ? "" : "  received: " + e.responseBody,
+              ]
+                .filter(Boolean)
+                .join("\\n"),
+            ),
           ),
-        ),
-      );
-      text(
-        "context",
-        lines([
-          "url: " + c.url,
-          "title: " + c.title,
-          "when: " + new Date(report.createdAt).toISOString(),
-          ...(c.viewport ? ["viewport: " + c.viewport.width + "×" + c.viewport.height + " @" + c.viewport.dpr] : []),
-          "browser: " + c.userAgent,
-          ...Object.entries(c.tags ?? {}).map(([k, v]) => "tag " + k + ": " + v),
-          ...(limits.truncated?.length ? ["truncated: " + limits.truncated.join(", ")] : []),
-          "sdk: rewindbug " + sdk.version + ", rrweb " + sdk.rrwebVersion,
-        ]),
-      );
-      const events = report.replay?.events ?? [];
-      if (!events.length) {
-        byId("stage").hidden = true;
-        byId("no-replay").hidden = false;
-        text("no-replay", "No recording: " + (limits.replayState ?? "off"));
-      } else {
-        const { Replayer } = window.rrwebReplay;
-        const stage = byId("stage");
-        let player;
-        const play = () => {
-          player?.destroy();
-          const box = document.createElement("div");
-          stage.replaceChildren(box);
-          player = new Replayer(events, {
-            root: box,
-            mouseTail: false,
-            showWarning: false,
-            speed: Number(byId("speed").value),
-          });
-          player.on("resize", ({ width, height }) => {
-            const scale = Math.min(1, stage.clientWidth / width);
-            box.style.transform = "scale(" + scale + ")";
-            stage.style.height = Math.ceil(height * scale) + "px";
-          });
-          player.play();
-        };
-        byId("speed").onchange = () => player?.setConfig({ speed: Number(byId("speed").value) });
-        byId("again").onclick = () => player?.play(0);
-        play();
+        );
+        text(
+          "context",
+          lines([
+            "url: " + c.url,
+            "title: " + c.title,
+            "when: " + new Date(report.createdAt).toISOString(),
+            ...(c.viewport ? ["viewport: " + c.viewport.width + "×" + c.viewport.height + " @" + c.viewport.dpr] : []),
+            "browser: " + c.userAgent,
+            ...Object.entries(c.tags ?? {}).map(([k, v]) => "tag " + k + ": " + v),
+            ...(limits.truncated?.length ? ["truncated: " + limits.truncated.join(", ")] : []),
+            "sdk: rewindbug " + sdk.version + ", rrweb " + sdk.rrwebVersion,
+          ]),
+        );
+        player?.destroy();
+        player = undefined;
+        stage.replaceChildren();
+        const events = report.replay?.events ?? [];
+        stage.hidden = !events.length;
+        byId("no-replay").hidden = !!events.length;
+        if (!events.length) {
+          text("no-replay", "No recording: " + (limits.replayState ?? "off"));
+          return;
+        }
+        const box = document.createElement("div");
+        stage.append(box);
+        player = new window.rrwebReplay.Replayer(events, {
+          root: box,
+          mouseTail: false,
+          showWarning: false,
+          speed: Number(byId("speed").value),
+        });
+        player.on("resize", ({ width, height }) => {
+          const scale = Math.min(1, stage.clientWidth / width);
+          box.style.transform = "scale(" + scale + ")";
+          stage.style.height = Math.ceil(height * scale) + "px";
+        });
+        player.play();
+      };
+      byId("speed").onchange = () => player?.setConfig({ speed: Number(byId("speed").value) });
+      byId("again").onclick = () => player?.play(0);
+      const list = byId("list");
+      const pick = (index) => {
+        for (const button of list.querySelectorAll("button"))
+          button.setAttribute("aria-current", String(Number(button.dataset.index) === index));
+        show(reports[index]);
+      };
+      if (reports.length > 1) {
+        list.hidden = false;
+        // the newest on top
+        for (let index = reports.length - 1; index >= 0; index--) {
+          const report = reports[index];
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.index = String(index);
+          const when = document.createElement("span");
+          when.className = "when";
+          when.textContent = clock(report.createdAt);
+          const [headline] = report.trigger.message.split("\\n");
+          button.append(when, report.trigger.kind + ": " + headline);
+          button.onclick = () => pick(index);
+          const item = document.createElement("li");
+          item.append(button);
+          list.append(item);
+        }
       }
+      pick(reports.length - 1);
     </script>
   </body>
 </html>

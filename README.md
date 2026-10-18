@@ -130,13 +130,13 @@ Import the single-file build, rrweb included, about 36 kB gzip:
 
 ```html
 <script type="module">
-  import { init } from "https://cdn.jsdelivr.net/npm/rewindbug@0.3/dist/rewindbug.browser.js";
+  import { init } from "https://cdn.jsdelivr.net/npm/rewindbug@0.4/dist/rewindbug.browser.js";
 
   init({ endpoint: "https://bugs.example.com/report" });
 </script>
 ```
 
-For a first try, run [`examples/endpoint`](examples/endpoint/README.md) from a clone of this repo and use `http://127.0.0.1:7358/report`. `@0.3` is for a first try: pin an exact version such as `@0.3.0` in production, the script sees the whole page. With a Content Security Policy, allow the CDN in `script-src`. With a bundler the same file is `rewindbug/browser`, but plain `rewindbug` is better there: it shares `@rrweb/record` with anything else that uses it.
+For a first try, run [`examples/endpoint`](examples/endpoint/README.md) from a clone of this repo and use `http://127.0.0.1:7358/report`. `@0.4` is for a first try: pin an exact version such as `@0.4.0` in production, the script sees the whole page. With a Content Security Policy, allow the CDN in `script-src`. With a bundler the same file is `rewindbug/browser`, but plain `rewindbug` is better there: it shares `@rrweb/record` with anything else that uses it.
 
 ### With a coding agent
 
@@ -208,15 +208,21 @@ export default defineConfig<{ rewindbug: RewindbugOptions }>({
 
 ### Without a server
 
-For a staging build or a QA session with nowhere to post reports, each report downloads as a file instead. Import from `rewindbug/download` and call `initDownload` in place of `init`, with the same [options](#options) except `endpoint`:
+For a staging build or a QA session with nowhere to post reports, the tester takes the reports as a file. Import from `rewindbug/download` and call `initDownload` in place of `init`, with the same [options](#options) except `endpoint`:
 
 ```ts
-import { capture, initDownload } from "rewindbug/download";
+import { initDownload } from "rewindbug/download";
 
 initDownload({ maskSelector: ".private" });
 ```
 
-Each new error saves `rewindbug-<time>.html` to the downloads folder: the recording, the steps, the test, the console, the network and the report JSON in one page that opens offline with a double click. Attach that file to the bug. The rrweb player inside, about 64 kB gzip, loads with the first report, not with the page. Nothing is posted anywhere. One page load downloads at most 10 files, and the same error comes once a minute; after the first file the browser may ask whether the page may download several. Without a bundler, import from `https://cdn.jsdelivr.net/npm/rewindbug@0.3/dist/download.browser.js`.
+Reports stay in the page, the last 10 of them, and nothing downloads on its own: a user of the app never gets a file. To take them:
+
+- **the keys:** Alt+Shift+R (Option+Shift+R on a Mac) saves every report in one file, `rewindbug-<time>.html`. A list on top of the file picks the report, the newest first and open;
+- **the console:** `rewindbug.list()` prints a numbered table of the reports, `rewindbug.download(2)` saves report 2 alone, `rewindbug.download()` all of them. Chrome blocks pasting into the console until you type `allow pasting` there once; typing the command works as is;
+- **the app:** `download()` and `download(n)`, imported from `rewindbug/download`, for a button of its own.
+
+With no report yet, the moment of the call is captured first, so a bug without an error can be taken too. The file holds the recording, the steps, the test, the console, the network and the report JSON of each report, in one page that opens offline with a double click. Attach it to the bug. The rrweb player inside, about 64 kB gzip, loads with the first file, not with the page. Nothing is posted anywhere. `hotkey: false` turns the keys off. Without a bundler, import from `https://cdn.jsdelivr.net/npm/rewindbug@0.4/dist/download.browser.js`.
 
 Take `capture` and `flush` from `rewindbug/download` too: an import of plain `rewindbug` next to it is a separate copy that `initDownload` did not start.
 
@@ -285,7 +291,7 @@ The SDK posts each report with `fetch` and `credentials: "omit"`. When the tab i
 
 - **To a coding agent:** [`rewindbug-mcp`](packages/mcp/README.md) receives reports on localhost and hands the last bug to Claude Code or Cursor over MCP. Register it as shown in [With a coding agent](#with-a-coding-agent).
 - **To a folder on a server:** [`examples/endpoint`](examples/endpoint/README.md), two files on Node with a Docker image. It writes the folder layout `rewindbug-mcp` reads, plays the recordings in the browser behind a token of its own and, with a repo and a token set, opens a GitHub issue for every new bug with the steps and the test.
-- **To a file, with no server:** `rewindbug/download` saves each report as a page that plays offline, see [Without a server](#without-a-server).
+- **To a file, with no server:** `rewindbug/download` keeps reports in the page, and the tester saves one as a page that plays offline, see [Without a server](#without-a-server).
 - **To your own backend:**
   - the body is gzip-compressed JSON sent as `text/plain`, without `Content-Encoding`: detect gzip by its first bytes `1f 8b`. The fields are in [Report format](#report-format);
   - on another origin, answer with `Access-Control-Allow-Origin`: without it the browser hides the answer, and the report stays queued and comes again;
@@ -362,7 +368,7 @@ Measured with `pnpm bench` in a clone of this repo (`pnpm bench -- --report` for
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | bundle, core without rrweb  | 14.9 kB gzip (`size-limit`, budget 15 kB, checked in CI)                                                                                                                                           |
 | bundle with `@rrweb/record` | about 36 kB gzip: `dist/rewindbug.browser.js` (`size-limit` reports 36.7 kB), budget 40 kB, checked in CI                                                                                          |
-| `rewindbug/download`        | 38.9 kB gzip with rrweb before the first report, budget 41 kB; 102.8 kB once the player has loaded, budget 105 kB; both checked in CI                                                              |
+| `rewindbug/download`        | 39.7 kB gzip with rrweb before the first file, budget 41 kB; 103.5 kB once the player has loaded, budget 105 kB; both checked in CI                                                                |
 | rewindbug on top of rrweb   | no measurable INP or TBT and under 0.2 MB of heap on the canvas, form and SPA pages; the table page is over the element limit and records nothing                                                  |
 | rrweb recording itself      | about 16 ms of INP at 4× slowdown on an interaction that re-renders much of the DOM, so about 4–5 ms on a regular CPU; 1–3 MB of heap                                                              |
 | full DOM snapshot           | at the start of recording and every `bufferSeconds`, blocking the main thread for a time that grows with the DOM; `pnpm bench` does not measure it near the 25 000-element limit                   |

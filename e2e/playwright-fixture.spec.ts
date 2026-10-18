@@ -105,7 +105,7 @@ test("a failed test gets the report with the recording", async ({
 
   // the recorded page cannot break out of the data script
   const page = failed?.files.get("rewindbug-1.html") ?? "";
-  expect(page).toContain('<script id="report" type="application/json">');
+  expect(page).toContain('<script id="reports" type="application/json">');
   expect(page.match(/<\/script>/g)).toHaveLength(3);
   // the player is on the page: no network at view time
   expect(page).toContain("rrwebReplay");

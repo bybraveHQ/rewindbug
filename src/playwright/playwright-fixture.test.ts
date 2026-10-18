@@ -18,7 +18,7 @@ const PLAYER = { script: "window.rrwebReplay = {};", style: ".x {}" };
 
 describe("report page", () => {
   test("the page loads nothing: player and styles are inline", () => {
-    const page = reportPage(report("a"), "t", PLAYER);
+    const page = reportPage([report("a")], "t", PLAYER);
     expect(page).toContain("<script>window.rrwebReplay = {};</script>");
     expect(page).toContain("<style>.x {}</style>");
     expect(page).not.toMatch(/<(script|link|img)[^>]* (src|href)=/);
@@ -33,7 +33,7 @@ describe("report page", () => {
   });
 
   test("the title is escaped", () => {
-    const page = reportPage(report("a"), `<img src=x onerror="1">`, PLAYER);
+    const page = reportPage([report("a")], `<img src=x onerror="1">`, PLAYER);
     expect(page).toContain(
       "<title>&lt;img src=x onerror=&quot;1&quot;&gt;</title>",
     );
