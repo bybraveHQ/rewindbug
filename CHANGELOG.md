@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 — 2026-10-18
+
+### rewindbug
+
+- `rewindbug/download`: reports with no server. `initDownload` takes the options of `init` except `endpoint`, and each report downloads as one HTML page with the recording, the steps, the test, the console, the network and the JSON; the page carries the rrweb player and opens offline. The player loads with the first report, not with the page. At most 10 files a page load. The CDN build is `dist/download.browser.js`.
+
 ## 0.2.1 — 2026-10-18
 
 ### rewindbug
