@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 — 2026-10-18
+
+### rewindbug
+
+- `rewindbug/download` no longer downloads a file on every error: on a user's computer that would drop files unasked, and one failure could start two downloads. Reports stay in the page, the last 10, until the tester takes them: Alt+Shift+R saves all of them in one file, `rewindbug.list()` and `rewindbug.download(n)` in the console pick one, and `download()` and `download(n)` are exported for a button of the app. With no report yet, the moment of the call is captured first. `hotkey: false` turns the keys off.
+- The report page holds several reports: a list on top picks one, the newest first and open. A Playwright attachment still holds one report and shows no list.
+
 ## 0.3.0 — 2026-10-18
 
 ### rewindbug
