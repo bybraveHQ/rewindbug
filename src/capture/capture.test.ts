@@ -96,6 +96,27 @@ describe("errors", () => {
     expect(triggers).toEqual([]);
   });
 
+  test("Next.js redirect and not-found signals are not triggers", () => {
+    start();
+    const redirect = Object.assign(new Error("NEXT_REDIRECT"), {
+      digest: "NEXT_REDIRECT;replace;/done;307;",
+    });
+    const notFound = Object.assign(new Error("not found"), {
+      digest: "NEXT_HTTP_ERROR_FALLBACK;404",
+    });
+    window.dispatchEvent(new ErrorEvent("error", { error: notFound }));
+    for (const reason of [redirect, new Error("NEXT_NOT_FOUND")]) {
+      const event = Object.assign(new Event("unhandledrejection"), { reason });
+      window.dispatchEvent(event);
+    }
+    window.dispatchEvent(
+      new ErrorEvent("error", { error: new Error("NEXT_PUBLIC_KEY missing") }),
+    );
+    expect(triggers).toEqual([
+      expect.objectContaining({ message: "NEXT_PUBLIC_KEY missing" }),
+    ]);
+  });
+
   test("an error event with a message but no object is a trigger", () => {
     start();
     window.dispatchEvent(new ErrorEvent("error", { message: "boom" }));

@@ -9,6 +9,16 @@ const MANUAL = "manual capture";
 // browser noise with no Error object: a cross-origin script error says
 // nothing ("Script error." or empty), a ResizeObserver loop is a benign warning
 const NOISE = /^(Script error\.?|ResizeObserver loop .*)?$/;
+// Next.js throws these to redirect or render not-found; they are control flow
+const FRAMEWORK_SIGNAL = /^NEXT_(REDIRECT|NOT_FOUND|HTTP_ERROR_FALLBACK)/;
+
+const isFrameworkSignal = (value: unknown): boolean => {
+  if (typeof value !== "object" || value === null) return false;
+  const { message, digest } = value as { message?: unknown; digest?: unknown };
+  return [message, digest].some(
+    (text) => typeof text === "string" && FRAMEWORK_SIGNAL.test(text),
+  );
+};
 
 const clip = (text: string, max: number, filter: UrlFilter) =>
   filterUrlsInText(text, filter).slice(0, max);
@@ -49,6 +59,7 @@ export const installErrorHandlers = (
     try {
       if (!(event instanceof ErrorEvent)) return;
       if (event.error !== undefined && event.error !== null) {
+        if (isFrameworkSignal(event.error)) return;
         const error = toTriggerError(event.error, filter);
         onTrigger({ kind: "error", at: now(), message: error.message, error });
         return;
@@ -66,6 +77,7 @@ export const installErrorHandlers = (
       // an uncaught failed fetch already became a network trigger
       if (typeof reason === "object" && reason !== null && reported.has(reason))
         return;
+      if (isFrameworkSignal(reason)) return;
       const error = toTriggerError(reason, filter);
       onTrigger({
         kind: "unhandledrejection",
