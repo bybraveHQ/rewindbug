@@ -2,7 +2,7 @@
   {
     "name": "core without rrweb",
     "path": "dist/index.js",
-    "limit": "15 kB",
+    "limit": "16 kB",
     "gzip": true,
     "ignore": ["@rrweb/record"]
   },

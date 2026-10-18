@@ -7,6 +7,21 @@
 - `rewindbug/download` no longer downloads a file on every error: on a user's computer that would drop files unasked, and one failure could start two downloads. Reports stay in the page, the last 10, until the tester takes them: Alt+Shift+R saves all of them in one file, `rewindbug.list()` and `rewindbug.download(n)` in the console pick one, and `download()` and `download(n)` are exported for a button of the app. With no report yet, the moment of the call is captured first. `hotkey: false` turns the keys off.
 - The report page holds several reports: a list on top picks one, the newest first and open. A Playwright attachment still holds one report and shows no list.
 
+### Privacy and safety
+
+- The report page has a Content-Security-Policy: only its own two scripts run, whatever markup a recording carries. It still loads the images, styles and fonts the recorded page used.
+- `maskSelector`, `rb-block` and `data-rb-unmask` on a shadow host now cover what renders in its open shadow root in the steps and the test as well; the recording already did for text, and now does for field values too.
+- A field the user cleared no longer leaves the value the server rendered into it, or a textarea's default text, in the recording.
+- A password's `value` attribute that a framework rewrites on every key is left out of the recording: it told the password's length and typing rhythm.
+- A masked select gets a fixed eight-asterisk mask: a mask as long as the chosen value named it among the recorded options.
+- The URL filter reads past an apostrophe inside a URL (`Mary's.jpg?Signature=…`), masks `&amp;token=` in HTML-escaped text, and filters relative and protocol-relative `url(...)` in CSS the page sets through the CSSOM or inline styles.
+- The generated test keeps a start path beginning with `//` on the base origin.
+
+### Example endpoint
+
+- The first copy of a report stays: a later body under the same id, from anyone holding the public write token, replaces nothing.
+- The viewer says a linked report is not found instead of showing the newest one, and keeps the view token for the tab only (`sessionStorage`).
+
 ## 0.3.0 — 2026-10-18
 
 ### rewindbug
