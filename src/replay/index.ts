@@ -17,6 +17,8 @@ const NET_EVENT = "rewindbug/net";
 const CONSOLE_PLUGIN = "rrweb/console@1";
 // one length for every password, so the recording does not tell its length
 const PASSWORD_MASK = "********";
+const BLOCK_CLASS = "rb-block";
+const BLOCK = `.${BLOCK_CLASS}`;
 
 export type ReplayState =
   "not-started" | "recording" | "stopped" | "dom-too-large";
@@ -50,9 +52,19 @@ const onIdle = (callback: () => void): (() => void) => {
   return () => clearTimeout(handle);
 };
 
-// cheap proxy for snapshot cost: 25k elements is ~50k nodes with text
-const domTooLarge = (): boolean =>
-  document.getElementsByTagName("*").length > MAX_DOM_ELEMENTS;
+// cheap proxy for snapshot cost: 25k elements is ~50k nodes with text.
+// rrweb records a blocked element as an empty placeholder, so its inside
+// costs nothing
+const domTooLarge = (): boolean => {
+  let count = document.getElementsByTagName("*").length;
+  for (const block of document.querySelectorAll(BLOCK))
+    if (!block.parentElement?.closest(BLOCK))
+      count -= block.getElementsByTagName("*").length;
+  return count > MAX_DOM_ELEMENTS;
+};
+
+const blocked = (node: Node): boolean =>
+  !!(node instanceof Element ? node : node.parentElement)?.closest(BLOCK);
 
 const validSelector = (selector: string): boolean => {
   if (!selector) return true;
@@ -64,10 +76,12 @@ const validSelector = (selector: string): boolean => {
   }
 };
 
-// a mounted subtree counts all its elements: rrweb serializes every one
+// a mounted subtree counts all its elements: rrweb serializes every one,
+// but nothing inside a blocked element
 const countRecords = (records: MutationRecord[]): number => {
   let count = 0;
   for (const item of records) {
+    if (blocked(item.target)) continue;
     if (item.type !== "childList") {
       count += 1;
       continue;
@@ -76,7 +90,9 @@ const countRecords = (records: MutationRecord[]): number => {
     for (const node of item.addedNodes) {
       count +=
         1 +
-        (node instanceof Element ? node.getElementsByTagName("*").length : 0);
+        (node instanceof Element && !node.matches(BLOCK)
+          ? node.getElementsByTagName("*").length
+          : 0);
     }
   }
   return count;
@@ -234,7 +250,7 @@ export const startReplay = (options: ReplayOptions): Replay => {
         ...(options.maskSelector
           ? { maskTextSelector: options.maskSelector }
           : {}),
-        blockClass: "rb-block",
+        blockClass: BLOCK_CLASS,
         // hidden inputs and meta tags carry CSRF and session tokens, never
         // anything a person typed or saw
         blockSelector:

@@ -367,6 +367,33 @@ describe("replay limits", () => {
     expect(record.mirror.getIds()).toEqual([]);
   });
 
+  it("records a page whose large part is blocked", async () => {
+    const table = container(LARGE_DOM);
+    table.className = "rb-block";
+    document.body.append(table);
+    const r = start();
+    await recording(r);
+    expect(r.snapshot(Infinity).mutationStorm).toBe(false);
+  });
+
+  it("ignores a burst and growth inside a blocked element", async () => {
+    const r = start();
+    await recording(r);
+    const block = container(0);
+    block.className = "rb-block";
+    document.body.append(block);
+    await sleep(WINDOW_WAIT_MS);
+    block.append(container(LARGE_DOM));
+    await sleep(WINDOW_WAIT_MS);
+    // a mutation outside the block runs the size check
+    document.body.append(container(1));
+    await sleep(POLL_MS * 5);
+    expect(r.snapshot(Infinity)).toMatchObject({
+      state: "recording",
+      mutationStorm: false,
+    });
+  });
+
   it(
     "stops when the DOM grows too large",
     async () => {
