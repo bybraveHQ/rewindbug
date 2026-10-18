@@ -3,8 +3,9 @@ import type { Target } from "../types.ts";
 const MAX_NAME_LENGTH = 40;
 const MAX_CSS_DEPTH = 5;
 const BLOCK_CLASS = ".rb-block";
-// ids with three digits in a row or a colon look generated (React useId, ...)
-const GENERATED_ID = /\d{3}|:/;
+// ids with three digits in a row or React useId (:r1:, «r1», _r_1_) look
+// generated; component libraries prefix them (base-ui-_r_6_, radix-:r1:)
+const GENERATED_ID = /\d{3}|[:«]|_r_\w*_/;
 const BUTTON_INPUTS = new Set(["button", "submit", "reset"]);
 const TEXTBOX_INPUTS = new Set(["text", "email", "tel", "url"]);
 // roles whose accessible name comes from their text

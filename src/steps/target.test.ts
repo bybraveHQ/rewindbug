@@ -121,6 +121,18 @@ describe("cssPath", () => {
     expect(cssPath($('[id=":r1:"]')).css).not.toContain(":r1:");
   });
 
+  test("skips React 19 useId and library-prefixed ids", () => {
+    for (const id of [
+      "_r_6_",
+      "base-ui-_r_6_",
+      "radix-«r2»",
+      "headlessui-:r3:",
+    ]) {
+      html(`<main><span id="${id}">x</span></main>`);
+      expect(cssPath($(`[id="${id}"]`)).css).not.toContain("#");
+    }
+  });
+
   test("stops at five levels and says when it is not unique", () => {
     const depth = 7;
     const nest = (n: number): string =>
