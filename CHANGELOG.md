@@ -2,6 +2,10 @@
 
 ## 0.1.1 — 2026-10-18
 
+### rewindbug
+
+- README on npm: npm version and license badges. No code changes.
+
 ### rewindbug-mcp
 
 - README on npm: badges, how the server relates to rewindbug and why it is a separate package, support links. No code changes.
