@@ -154,6 +154,13 @@ const writeTemp = async (target, text) => {
 const save = async (report, text, receivedAt) => {
   // the folder may be deleted while the server runs
   await mkdir(REPORTS, { recursive: true, mode: 0o700 });
+  // the first copy of a report stays: the SDK resends the same one, and the
+  // write token is public, so a later body under a known id must not replace
+  // what is stored and linked from an issue
+  const stored = (await readdir(REPORTS))
+    .map((file) => file.replace(/\.json$/, ""))
+    .find((name) => NAME.test(name) && name.endsWith(`-${report.id}`));
+  if (stored) return stored;
   const base = `${stamp(receivedAt)}-${report.id}`;
   const reportPath = join(REPORTS, `${base}.json`);
   const summaryPath = join(REPORTS, `${base}.summary.json`);
@@ -179,13 +186,8 @@ const save = async (report, text, receivedAt) => {
         .filter((name) => NAME.test(name)),
     ),
   ].sort();
-  // an older copy of the same report goes after the new one is in place
-  const stale = bases.filter(
-    (name) => name !== base && name.endsWith(report.id),
-  );
-  const kept = bases.filter((name) => !stale.includes(name));
-  const excess = kept.slice(0, Math.max(0, kept.length - MAX_REPORTS));
-  for (const name of [...stale, ...excess]) {
+  const excess = bases.slice(0, Math.max(0, bases.length - MAX_REPORTS));
+  for (const name of excess) {
     await removeFile(join(REPORTS, `${name}.summary.json`));
     await removeFile(join(REPORTS, `${name}.json`));
   }

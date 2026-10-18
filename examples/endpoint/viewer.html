@@ -134,13 +134,14 @@
       const VERSION = /^\d+\.\d+\.\d+$/;
       const base = location.pathname.replace(/\/$/, "");
       const KEY = "rewindbug-view-token";
-      // the token arrives once as #token=…, then lives in this browser only;
+      // the token arrives once as #token=…, then lives in this tab only:
+      // localStorage would hand it to any server bound to this port later;
       // the fragment never reaches a server or a Referer header
       const hash = new URLSearchParams(location.hash.slice(1));
       let token = hash.get("token") ?? "";
       try {
-        if (token) localStorage.setItem(KEY, token);
-        else token = localStorage.getItem(KEY) ?? "";
+        if (token) sessionStorage.setItem(KEY, token);
+        else token = sessionStorage.getItem(KEY) ?? "";
       } catch {
         // storage blocked: the token works for this page load only
       }
@@ -318,7 +319,7 @@
       const listed = await get("/list");
       if (listed.status === 401) {
         try {
-          localStorage.removeItem(KEY);
+          sessionStorage.removeItem(KEY);
         } catch {
           // nothing stored
         }
@@ -348,10 +349,16 @@
         byId("speed").onchange = () =>
           player?.setConfig({ speed: Number(byId("speed").value) });
         byId("again").onclick = () => player?.play(0);
+        // a link to a report that is not here says so, never shows another
         const wanted = hash.get("report");
-        const first = list.find((s) => s.name === wanted) ?? list[0];
-        pick.value = first.name;
-        await load(first.name);
+        const first = wanted ? list.find((s) => s.name === wanted) : list[0];
+        if (first) {
+          pick.value = first.name;
+          await load(first.name);
+        } else {
+          pick.selectedIndex = -1;
+          text("headline", `Report ${wanted} not found`);
+        }
       }
     </script>
   </body>

@@ -116,12 +116,22 @@ test("a gzip report lands as a pair that rewindbug-mcp reads", async () => {
   assert.equal(read.status, "ok");
 });
 
-test("the same report sent again replaces the older copy", async () => {
+test("the same report sent again keeps the first copy", async () => {
   const { dir, url } = await start();
   const body = gzipSync(JSON.stringify(fixture));
   assert.equal((await post(url, body)).status, 204);
   assert.equal((await post(url, body)).status, 204);
   assert.equal((await readdir(join(dir, "reports"))).length, 2);
+  // the write token is public: a body under a known id replaces nothing
+  const forged = {
+    ...fixture,
+    trigger: { ...fixture.trigger, message: "forged" },
+  };
+  assert.equal((await post(url, JSON.stringify(forged))).status, 204);
+  assert.equal((await readdir(join(dir, "reports"))).length, 2);
+  const read = await readReport(dir, fixture.id);
+  assert.equal(read.status, "ok");
+  assert.equal(read.stored.report.trigger.message, fixture.trigger.message);
 });
 
 test("bad bodies are refused", async () => {
