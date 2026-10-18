@@ -541,6 +541,25 @@ test("backticks in the test cannot close the issue's code block", async () => {
   );
 });
 
+test("github writes are capped per hour, whatever fingerprints arrive", async () => {
+  const hub = await fakeGithub([201, 201, 201]);
+  const { url, logs } = await start({
+    ...withGithub(hub),
+    REWINDBUG_GITHUB_MAX_PER_HOUR: "2",
+  });
+  for (const n of [1, 2, 3, 4]) {
+    const report = {
+      ...fixture,
+      id: `0b7c4c1e-5a1f-4c2b-9d3e-8f6a1b2c3d4${n}`,
+      fingerprint: `spam${n}`,
+    };
+    assert.equal((await post(url, JSON.stringify(report))).status, 204);
+  }
+  await waitFor(() => logs().includes("github limit: 2"));
+  assert.equal(hub.calls.length, 2);
+  assert.equal(logs().match(/github limit/g).length, 1);
+});
+
 test("github settings are checked at start", async () => {
   await assert.rejects(
     start({ REWINDBUG_GITHUB_REPO: "acme/app" }),
@@ -550,4 +569,9 @@ test("github settings are checked at start", async () => {
     start({ REWINDBUG_GITHUB_REPO: "acme", REWINDBUG_GITHUB_TOKEN: "x" }),
     /server exited: 1/,
   );
+  for (const cap of ["0", "-1", "2.5", "lots"])
+    await assert.rejects(
+      start({ REWINDBUG_GITHUB_MAX_PER_HOUR: cap }),
+      /server exited: 1/,
+    );
 });

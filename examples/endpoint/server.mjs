@@ -32,6 +32,10 @@ const GITHUB_LABELS = (process.env.REWINDBUG_GITHUB_LABELS ?? "bug")
   .map((label) => label.trim())
   .filter(Boolean);
 const GITHUB_API = process.env.REWINDBUG_GITHUB_API || "https://api.github.com";
+// the write token is public: anyone holding it can send reports with new
+// fingerprints, so the issues and comments made for them are capped
+const GITHUB_MAX_PER_HOUR_ENV =
+  process.env.REWINDBUG_GITHUB_MAX_PER_HOUR ?? "20";
 // the viewer as a browser reaches it, without the view token, for the
 // recording link in an issue
 const PUBLIC_URL = process.env.REWINDBUG_PUBLIC_URL || "";
@@ -304,6 +308,28 @@ const ISSUE_FIELD_MAX = 1000;
 const ISSUE_BLOCK_MAX = 6000;
 const ISSUE_IDS_MAX = 100;
 const GITHUB_TIMEOUT_MS = 10_000;
+const HOUR_MS = 60 * 60_000;
+const GITHUB_MAX_PER_HOUR = Number(GITHUB_MAX_PER_HOUR_ENV);
+// times of the GitHub writes in the last hour
+let githubWrites = [];
+let githubCapLogged = false;
+
+const githubAllowed = (report) => {
+  const now = Date.now();
+  githubWrites = githubWrites.filter((at) => now - at < HOUR_MS);
+  if (githubWrites.length < GITHUB_MAX_PER_HOUR) {
+    githubCapLogged = false;
+    githubWrites.push(now);
+    return true;
+  }
+  if (!githubCapLogged) {
+    log(
+      `github limit: ${GITHUB_MAX_PER_HOUR} issues and comments in the last hour, reports stay on disk only (first: ${report.id})`,
+    );
+    githubCapLogged = true;
+  }
+  return false;
+};
 const HTTPS = /^https:\/\//;
 
 // newest first; a summary without its report (being written) is skipped
@@ -523,6 +549,7 @@ const notifyGithub = async (report, base) => {
   if (issues === null) return;
   const known = issues[report.fingerprint];
   if (isObject(known) && known.ids?.includes(report.id)) return;
+  if (!githubAllowed(report)) return;
   if (isObject(known) && Number.isSafeInteger(known.number)) {
     await github(`/repos/${GITHUB_REPO}/issues/${known.number}/comments`, {
       body: repeatComment(report, base),
@@ -666,6 +693,14 @@ if (VIEW_TOKEN_ENV && VIEW_TOKEN_ENV === TOKEN) {
 
 if (GITHUB_REPO && !REPO_NAME.test(GITHUB_REPO)) {
   log("REWINDBUG_GITHUB_REPO must look like owner/name");
+  process.exit(1);
+}
+if (
+  !Number.isSafeInteger(GITHUB_MAX_PER_HOUR) ||
+  GITHUB_MAX_PER_HOUR < 1 ||
+  String(GITHUB_MAX_PER_HOUR) !== GITHUB_MAX_PER_HOUR_ENV
+) {
+  log("REWINDBUG_GITHUB_MAX_PER_HOUR must be a whole number, 1 or more");
   process.exit(1);
 }
 if (GITHUB_REPO && !GITHUB_TOKEN) {

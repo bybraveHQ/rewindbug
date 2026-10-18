@@ -48,25 +48,26 @@ node server.mjs
 
 Each new bug opens an issue: the error as the title, then the page, time and browser, a link to the recording in the viewer, the reproduction steps, the error with its stack, the last 20 console and network lines, and the Playwright test folded under "Playwright test". Bugs are told apart by the report's `fingerprint`: the same error coming again adds a comment with the time, page and recording to the existing issue instead of opening a new one, even after the issue was closed. The map of fingerprints to issues is `issues.json` in `REWINDBUG_DIR`; delete a fingerprint's entry there to get a fresh issue next time. If the file is not valid JSON, the server logs it and leaves GitHub alone until it is fixed. A report that the SDK sends twice makes one issue or comment.
 
-The SDK gets its answer as soon as the report is on disk; GitHub is called after that, one report at a time, with a 10 second limit. A GitHub error is logged and never refuses a report, and the same report sent again by the SDK tries GitHub again. Reports still waiting for GitHub when the server stops are not sent there; the log says how many. Console lines and request URLs go to the issue as they are in the report, so if your pages log user data, redact it with the SDK's `beforeSend` before it leaves the browser. Set `REWINDBUG_GITHUB_LABELS` to change the label `bug`.
+The SDK gets its answer as soon as the report is on disk; GitHub is called after that, one report at a time, with a 10 second limit. A GitHub error is logged and never refuses a report, and the same report sent again by the SDK tries GitHub again. Reports still waiting for GitHub when the server stops are not sent there; the log says how many. Console lines and request URLs go to the issue as they are in the report, so if your pages log user data, redact it with the SDK's `beforeSend` before it leaves the browser. Set `REWINDBUG_GITHUB_LABELS` to change the label `bug`. The write token sits in your app's code, so anyone can send reports with it, each one under a new fingerprint: the server makes at most `REWINDBUG_GITHUB_MAX_PER_HOUR` issues and comments an hour, 20 by default, logs once when it hits that and keeps later reports on disk only.
 
 `REWINDBUG_PUBLIC_URL` is the viewer's address without the token: the link in an issue opens the report only in a browser that already holds the view token. Without it the issue names the report file.
 
 ## Settings
 
-| Variable                  | Default                            | Meaning                                                                                                                |
-| ------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `PORT`                    | `7358`                             | `0` picks a free port                                                                                                  |
-| `HOST`                    | `127.0.0.1`                        | `0.0.0.0` in the Docker image                                                                                          |
-| `REWINDBUG_DIR`           | `.rewindbug` in the working folder | reports go to `reports/` inside it                                                                                     |
-| `REWINDBUG_TOKEN`         | none                               | the path becomes `/report/<token>`; required beyond loopback                                                           |
-| `REWINDBUG_OPEN`          | none                               | `1` lets the server listen beyond loopback without a token                                                             |
-| `REWINDBUG_VIEW_TOKEN`    | made on loopback, in `view-token`  | the token for reading reports; required beyond loopback; must differ from `REWINDBUG_TOKEN`                            |
-| `REWINDBUG_ORIGIN`        | `*`                                | `Access-Control-Allow-Origin`: your app's origin in production; with `*` on loopback only pages from loopback may post |
-| `REWINDBUG_GITHUB_REPO`   | none                               | `owner/name`: open an issue for every new bug                                                                          |
-| `REWINDBUG_GITHUB_TOKEN`  | none                               | token with Issues: write; required with `REWINDBUG_GITHUB_REPO`                                                        |
-| `REWINDBUG_GITHUB_LABELS` | `bug`                              | labels for new issues, comma-separated                                                                                 |
-| `REWINDBUG_PUBLIC_URL`    | none                               | the viewer as browsers reach it, without the token, for the recording link in issues                                   |
+| Variable                        | Default                            | Meaning                                                                                                                |
+| ------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                          | `7358`                             | `0` picks a free port                                                                                                  |
+| `HOST`                          | `127.0.0.1`                        | `0.0.0.0` in the Docker image                                                                                          |
+| `REWINDBUG_DIR`                 | `.rewindbug` in the working folder | reports go to `reports/` inside it                                                                                     |
+| `REWINDBUG_TOKEN`               | none                               | the path becomes `/report/<token>`; required beyond loopback                                                           |
+| `REWINDBUG_OPEN`                | none                               | `1` lets the server listen beyond loopback without a token                                                             |
+| `REWINDBUG_VIEW_TOKEN`          | made on loopback, in `view-token`  | the token for reading reports; required beyond loopback; must differ from `REWINDBUG_TOKEN`                            |
+| `REWINDBUG_ORIGIN`              | `*`                                | `Access-Control-Allow-Origin`: your app's origin in production; with `*` on loopback only pages from loopback may post |
+| `REWINDBUG_GITHUB_REPO`         | none                               | `owner/name`: open an issue for every new bug                                                                          |
+| `REWINDBUG_GITHUB_TOKEN`        | none                               | token with Issues: write; required with `REWINDBUG_GITHUB_REPO`                                                        |
+| `REWINDBUG_GITHUB_LABELS`       | `bug`                              | labels for new issues, comma-separated                                                                                 |
+| `REWINDBUG_GITHUB_MAX_PER_HOUR` | `20`                               | issues and comments at most per hour; reports past it stay on disk only                                                |
+| `REWINDBUG_PUBLIC_URL`          | none                               | the viewer as browsers reach it, without the token, for the recording link in issues                                   |
 
 Beyond loopback the server does not start without a token, unless `REWINDBUG_OPEN=1` says that anyone who reaches the port may write reports. On loopback it answers `421` to any `Host` but `127.0.0.1` and `localhost`, so a page from another site cannot reach it through DNS rebinding, and `403` to a post from a page that is not itself on loopback, unless `REWINDBUG_ORIGIN` names your app.
 
