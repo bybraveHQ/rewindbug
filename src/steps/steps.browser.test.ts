@@ -86,6 +86,28 @@ describe("steps", () => {
     expect(JSON.stringify(got)).not.toContain("1234");
   });
 
+  for (const [host, maskSelector] of [
+    ['<account-card class="private"></account-card>', ".private"],
+    ['<account-card class="rb-block"></account-card>', ""],
+  ] as const)
+    for (const maskInputs of [true, false])
+      it(`a mask on a shadow host covers what it renders: ${host}, maskInputs ${maskInputs}`, async () => {
+        document.body.innerHTML = host;
+        const root = $("account-card").attachShadow({ mode: "open" });
+        root.innerHTML =
+          '<label>Note <input id="note" data-rb-unmask></label><button>DE89 3704 0044</button>';
+        const s = start({ maskInputs, maskSelector });
+        const field = root.querySelector("#note");
+        const button = root.querySelector("button");
+        if (!field || !button) throw new Error("no shadow content");
+        await userEvent.type(field, "TYPED-NOTE");
+        await userEvent.click(button);
+        const got = JSON.stringify(recorded(s));
+        expect(got).not.toContain("TYPED-NOTE");
+        expect(got).not.toContain("DE89");
+        expect(got).not.toContain("Note");
+      });
+
   it("records a click on the nearest interactive ancestor", async () => {
     document.body.innerHTML =
       '<button data-testid="pay"><span>Pay now</span></button>';

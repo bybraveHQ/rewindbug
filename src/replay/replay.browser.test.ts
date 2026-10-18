@@ -199,6 +199,116 @@ describe("replay", () => {
     expect(masks).toEqual(['"value":"********"', '"value":"********"']);
   });
 
+  it("a cleared field does not record the value the server rendered", async () => {
+    // rrweb masks only a live value that is not empty
+    document.body.innerHTML = `
+      <input type="password" value="SERVER-PASSWORD">
+      <input value="SERVER-TEXT">
+      <textarea>SERVER-NOTE</textarea>
+      <input type="submit" value="Pay now">
+    `;
+    for (const field of document.querySelectorAll<
+      HTMLInputElement | HTMLTextAreaElement
+    >("input:not([type=submit]), textarea"))
+      field.value = "";
+    const r = start();
+    await recording(r);
+    const late = document.createElement("textarea");
+    late.textContent = "SERVER-LATE";
+    late.value = "";
+    document.body.append(late);
+    await until(() => events(r).some((e) => e.type === 3));
+    const recorded = JSON.stringify(events(r));
+    for (const secret of [
+      "SERVER-PASSWORD",
+      "SERVER-TEXT",
+      "SERVER-NOTE",
+      "SERVER-LATE",
+    ])
+      expect(recorded).not.toContain(secret);
+    expect(recorded).toContain("Pay now");
+  });
+
+  it("keeps button labels and masks a textarea a script rewrites", async () => {
+    document.body.innerHTML = `
+      <input type="reset" value="Clear form">
+      <textarea>start</textarea>
+    `;
+    const area = document.querySelector("textarea");
+    const r = start();
+    await recording(r);
+    const text = area?.firstChild;
+    if (text) text.textContent = "SCRIPT-NOTE";
+    await until(() => events(r).some((e) => e.type === 3));
+    const recorded = JSON.stringify(events(r));
+    expect(recorded).toContain("Clear form");
+    expect(recorded).not.toContain("SCRIPT-NOTE");
+  });
+
+  it("masks a field in a same-origin iframe and keeps its button label", async () => {
+    const frame = document.createElement("iframe");
+    document.body.append(frame);
+    const inner = frame.contentDocument;
+    if (!inner) throw new Error("no iframe document");
+    inner.body.innerHTML =
+      '<input value="FRAME-SECRET"><input type="submit" value="Send it">';
+    const r = start();
+    await recording(r);
+    await until(() => JSON.stringify(events(r)).includes("Send it"));
+    expect(JSON.stringify(events(r))).not.toContain("FRAME-SECRET");
+  });
+
+  it("a select mask does not tell which option was chosen", async () => {
+    document.body.innerHTML = `
+      <select><option value="male">Male</option>
+      <option value="female" selected>Female</option></select>
+    `;
+    const r = start();
+    await recording(r);
+    const recorded = JSON.stringify(events(r));
+    expect(recorded).toContain('"value":"********"');
+    expect(recorded).not.toContain('"value":"******"');
+  });
+
+  it("does not record a password's value attribute changing on every key", async () => {
+    // React syncs the value attribute of a controlled field as it is typed
+    document.body.innerHTML = '<input type="password">';
+    const field = document.querySelector("input");
+    const r = start();
+    await recording(r);
+    // one key a tick, as typing comes: each its own mutation record
+    for (const value of ["h", "hu", "hun"]) {
+      field?.setAttribute("value", value);
+      await sleep(POLL_MS);
+    }
+    document.body.append(document.createElement("section"));
+    await until(() => events(r).some((e) => e.type === 3));
+    const recorded = JSON.stringify(events(r));
+    expect(recorded).not.toContain('"value":"********"');
+    // not even an empty event per key: their count is the length
+    const empty = events(r).filter((e) => {
+      const data = e.data as Record<string, unknown[] | number>;
+      return (
+        e.type === 3 &&
+        data.source === 0 &&
+        ["adds", "removes", "attributes", "texts"].every(
+          (key) => (data[key] as unknown[] | undefined)?.length === 0,
+        )
+      );
+    });
+    expect(empty).toEqual([]);
+  });
+
+  it("masks a field inside the shadow root of a host under maskSelector", async () => {
+    document.body.innerHTML = '<div class="private"></div>';
+    const host = document.querySelector(".private");
+    const root = host?.attachShadow({ mode: "open" });
+    if (root) root.innerHTML = '<input value="DE89-SHADOW">';
+    const r = start({ maskInputs: false, maskSelector: ".private" });
+    await recording(r);
+    expect(JSON.stringify(events(r))).not.toContain("DE89-SHADOW");
+  });
+
   it("does not record meta tags that carry csrf or session tokens", async () => {
     for (const name of ["_csrf", "xsrf-token", "api-token"]) {
       const meta = document.createElement("meta");

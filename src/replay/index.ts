@@ -2,7 +2,13 @@ import { record } from "@rrweb/record";
 import type { ConsoleEntry } from "../types.ts";
 import type { UrlFilter } from "../shared/url-filter.ts";
 import { SegmentBuffer, type RecordedEvent } from "./buffer.ts";
-import { MutationRate, mutationCount, sanitizeEvent } from "./sanitize.ts";
+import { closestAcross, isPassword } from "../shared/dom.ts";
+import {
+  MutationRate,
+  mutationCount,
+  sanitizeEvent,
+  type InputMask,
+} from "./sanitize.ts";
 
 const MAX_EVENTS = 20_000;
 const MUTATION_LIMIT = 10_000;
@@ -15,10 +21,17 @@ const META = 4;
 const NET_EVENT = "rewindbug/net";
 // the name rrweb's console replay plugin listens for
 const CONSOLE_PLUGIN = "rrweb/console@1";
-// one length for every password, so the recording does not tell its length
-const PASSWORD_MASK = "********";
+// one length for every password, so the recording does not tell its length;
+// a select's too: its options are recorded, a mask as long as the choice
+// would name it
+const FIXED_MASK = "********";
 const BLOCK_CLASS = "rb-block";
 const BLOCK = `.${BLOCK_CLASS}`;
+// their value is a button's label or a checkbox's or radio's name
+const LABEL_INPUTS = /^(radio|checkbox|submit|reset|button)$/;
+// tag names, not instanceof: a field in a same-origin iframe has its own
+// HTMLInputElement
+const FIELDS = /^(INPUT|TEXTAREA|SELECT)$/;
 
 export type ReplayState =
   "not-started" | "recording" | "stopped" | "dom-too-large";
@@ -115,6 +128,43 @@ export const startReplay = (options: ReplayOptions): Replay => {
   let guard: MutationObserver | undefined;
   let pluginEmit: ((data: unknown) => void) | undefined;
 
+  // a password is always masked, a field under maskSelector too, the rest
+  // unless maskInputs is off or it sits under data-rb-unmask
+  const maskValue = (text: string, element: HTMLElement | Element): string => {
+    if (isPassword(element)) return text && FIXED_MASK;
+    if (
+      element.tagName === "INPUT" &&
+      LABEL_INPUTS.test((element as HTMLInputElement).type)
+    )
+      return text;
+    const masked =
+      (options.maskSelector && closestAcross(element, options.maskSelector)) ||
+      (options.maskInputs && !closestAcross(element, "[data-rb-unmask]"));
+    if (!masked) return text;
+    return element.tagName === "SELECT"
+      ? text && FIXED_MASK
+      : "*".repeat(text.length);
+  };
+  // the element behind an rrweb id, or the textarea around a text node
+  const elementOf = (id: number): Element | null | undefined => {
+    const node = record.mirror.getNode(id);
+    return node?.nodeType === Node.TEXT_NODE
+      ? node.parentElement
+      : (node as Element | null);
+  };
+  // a node gone from the page has nothing to decide by: masked
+  const inputMask: InputMask = {
+    value: (id, value) => {
+      const element = elementOf(id);
+      if (!element) return value && FIXED_MASK;
+      return FIELDS.test(element.tagName) ? maskValue(value, element) : value;
+    },
+    isPassword: (id) => {
+      const element = elementOf(id);
+      return !element || (FIELDS.test(element.tagName) && isPassword(element));
+    },
+  };
+
   const halt = (reason: "stopped" | "dom-too-large" = "stopped") => {
     const wasRecording = state === "recording";
     state = reason;
@@ -170,7 +220,7 @@ export const startReplay = (options: ReplayOptions): Replay => {
     if (state !== "recording") return;
     try {
       const event = raw as RecordedEvent;
-      sanitizeEvent(event, options.filter);
+      if (!sanitizeEvent(event, options.filter, inputMask)) return;
       if (event.type === META) lastCheckout = event.timestamp;
       if (
         eventRate.exceeded(mutationCount(event), event.timestamp) ||
@@ -231,22 +281,7 @@ export const startReplay = (options: ReplayOptions): Replay => {
         // every input goes through maskInputFn, so maskInputs: false still
         // keeps passwords out: rrweb alone would mask only type=password
         maskAllInputs: true,
-        // same rule as the steps: a password (also one a "show password"
-        // button turned into text, which rrweb marks, or one whose
-        // autocomplete, name or id says so) or a field under maskSelector is
-        // always masked, the rest unless maskInputs is off or it sits under
-        // data-rb-unmask; a password mask has a fixed length
-        maskInputFn: (text, element) =>
-          (element as HTMLInputElement).type === "password" ||
-          element.hasAttribute("data-rr-is-password") ||
-          /pass|pwd/i.test(
-            `${element.getAttribute("autocomplete")} ${element.getAttribute("name")} ${element.id}`,
-          )
-            ? text && PASSWORD_MASK
-            : (options.maskSelector && element.closest(options.maskSelector)) ||
-                (options.maskInputs && !element.closest("[data-rb-unmask]"))
-              ? "*".repeat(text.length)
-              : text,
+        maskInputFn: maskValue,
         ...(options.maskSelector
           ? { maskTextSelector: options.maskSelector }
           : {}),

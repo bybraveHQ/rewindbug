@@ -203,6 +203,58 @@ describe("urls in the recorded DOM", () => {
     expect(text).toContain('"important"');
   });
 
+  it("filters relative and protocol-relative urls in css", () => {
+    const events: RecordedEvent[] = [
+      {
+        type: 3,
+        timestamp: 1,
+        data: {
+          source: 8,
+          id: 4,
+          adds: [
+            {
+              rule: ".a { background: url(/api/files/42?token=S), url('//cdn.example/x?sig=S') }",
+              index: 0,
+            },
+          ],
+        },
+      },
+      {
+        type: 3,
+        timestamp: 1,
+        data: {
+          source: 0,
+          adds: [],
+          removes: [],
+          texts: [],
+          attributes: [
+            {
+              id: 2,
+              attributes: {
+                style: { background: 'url("preview?token=S")' },
+              },
+            },
+          ],
+        },
+      },
+    ];
+    for (const event of events) sanitizeEvent(event, defaultUrlFilter);
+    const text = JSON.stringify(events);
+    expect(text).not.toContain("=S");
+    expect(text.match(/(token|sig)=\*/g)).toHaveLength(3);
+  });
+
+  it("leaves data urls in css as they are", () => {
+    const rule = ".a { background: url(data:image/png;base64,QUJD) }";
+    const event: RecordedEvent = {
+      type: 3,
+      timestamp: 1,
+      data: { source: 8, id: 4, adds: [{ rule, index: 0 }] },
+    };
+    sanitizeEvent(event, defaultUrlFilter);
+    expect(JSON.stringify(event)).toContain(rule);
+  });
+
   it("filters url attributes in added nodes and attribute changes", () => {
     const event: RecordedEvent = {
       type: 3,

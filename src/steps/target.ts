@@ -1,4 +1,5 @@
 import type { Target } from "../types.ts";
+import { closestAcross } from "../shared/dom.ts";
 
 const MAX_NAME_LENGTH = 40;
 const MAX_CSS_DEPTH = 5;
@@ -40,10 +41,10 @@ export const collapse = (text: string): string =>
   text.replace(/\s+/g, " ").trim();
 
 export const isMasked = (element: Element, maskSelector: string): boolean => {
-  if (element.closest(BLOCK_CLASS)) return true;
+  if (closestAcross(element, BLOCK_CLASS)) return true;
   if (!maskSelector) return false;
   try {
-    return element.closest(maskSelector) !== null;
+    return closestAcross(element, maskSelector) !== null;
   } catch {
     // an invalid selector must not unmask anything
     return true;

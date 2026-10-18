@@ -1,4 +1,5 @@
 import type { Step, StepKey } from "../types.ts";
+import { closestAcross, isPassword } from "../shared/dom.ts";
 import { RingBuffer } from "../shared/ring.ts";
 import type { UrlFilter } from "../shared/url-filter.ts";
 import { collapse, isEditable, isMasked, targetOf } from "./target.ts";
@@ -99,16 +100,6 @@ const fieldValue = (field: HTMLElement): string =>
     ? field.value
     : (field.textContent ?? "");
 
-// a field a "show password" button turned into text, or swapped for a new
-// one: its type when it got focus, rrweb's mark, its autocomplete, name or
-// id still say what it is
-const isPassword = (field: Element): boolean =>
-  (field as HTMLInputElement).type === "password" ||
-  field.hasAttribute("data-rr-is-password") ||
-  /pass|pwd/i.test(
-    `${field.getAttribute("autocomplete")} ${field.getAttribute("name")} ${field.id}`,
-  );
-
 // the element itself inside an open shadow root, where event.target is the
 // host; Playwright's locators reach into open shadow roots too
 // composedPath is never empty while the event is dispatched
@@ -156,7 +147,7 @@ export const startSteps = (options: StepsOptions): Steps => {
   const masked = (field: Element, password: boolean) =>
     password ||
     isMasked(field, options.maskSelector) ||
-    (options.maskInputs && !field.closest(UNMASK));
+    (options.maskInputs && !closestAcross(field, UNMASK));
 
   const valueFields = (field: Element, raw: string, password: boolean) =>
     masked(field, password)
