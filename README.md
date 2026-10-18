@@ -8,6 +8,8 @@ When a page breaks in a user's browser, rewindbug turns the last seconds before 
 
 **Demo:** [break a page and get the bug](https://bybravehq.github.io/rewindbug/). Nothing leaves the page there: a service worker plays the endpoint.
 
+![The rewindbug demo: a click on Apply coupon throws, and a bug report with the replay, the steps and a Playwright test appears](https://raw.githubusercontent.com/bybraveHQ/rewindbug/main/assets/demo.gif)
+
 ## What you get
 
 A click on "Apply coupon" in the demo throws. The report from a run of the demo on a local server holds the steps:
