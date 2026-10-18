@@ -17,19 +17,42 @@ export const embedJson = (value: unknown): string =>
 
 export type Player = { script: string; style: string };
 
+export const NONCE_BYTES = 16;
+
+export const nonceOf = (bytes: Uint8Array): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+// the recording is page markup a script on that page could shape: only our
+// two scripts run, whatever the player builds; the images, styles, fonts and
+// media the recorded page used still load, the recording looks like the page
+const policy = (nonce: string): string =>
+  [
+    "default-src 'none'",
+    `script-src 'nonce-${nonce}'`,
+    "style-src 'unsafe-inline' *",
+    "img-src * data: blob:",
+    "font-src * data:",
+    "media-src * data: blob:",
+    "frame-src 'self' data: blob:",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join("; ");
+
 // reports as a page of their own, a test attachment or a download: the
 // reports, the rrweb player and its styles are all inline, so the file opens
-// offline and fetches nothing; every report field goes in through
-// textContent. With more than one, a list on top picks the report, the
-// newest first
+// offline; every report field goes in through textContent. With more than
+// one, a list on top picks the report, the newest first. The nonce is fresh
+// random hex for each page
 export const reportPage = (
   reports: readonly Report[],
   title: string,
   player: Player,
+  nonce: string,
 ): string => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="${policy(nonce)}" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)}</title>
     <style>
@@ -82,8 +105,8 @@ export const reportPage = (
     <pre id="context"></pre>
     <script id="reports" type="application/json">${embedJson(reports)}</script>
     <!-- @rrweb/replay, MIT, https://github.com/rrweb-io/rrweb -->
-    <script>${player.script}</script>
-    <script>
+    <script nonce="${nonce}">${player.script}</script>
+    <script nonce="${nonce}">
       const reports = JSON.parse(document.getElementById("reports").textContent);
       const byId = (id) => document.getElementById(id);
       const text = (id, value) => (byId(id).textContent = value);

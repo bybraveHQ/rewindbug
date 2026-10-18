@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
@@ -16,7 +17,7 @@ import {
   uniqueReports,
   type RewindbugOptions,
 } from "./parts.ts";
-import { reportPage } from "../report/page.ts";
+import { NONCE_BYTES, nonceOf, reportPage } from "../report/page.ts";
 
 export { expect } from "@playwright/test";
 export type { RewindbugOptions };
@@ -75,7 +76,10 @@ const attach = async (testInfo: TestInfo, reports: Report[]) => {
     const title = `${testInfo.title}: ${headline}`.slice(0, MAX_TITLE_LENGTH);
     const html = testInfo.outputPath(`${name}.html`);
     const json = testInfo.outputPath(`${name}.json`);
-    await writeFile(html, reportPage([report], title, player));
+    await writeFile(
+      html,
+      reportPage([report], title, player, nonceOf(randomBytes(NONCE_BYTES))),
+    );
     await writeFile(json, JSON.stringify(report, null, 2));
     await testInfo.attach(`${name}.html`, {
       path: html,

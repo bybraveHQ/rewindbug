@@ -6,7 +6,7 @@ import {
   looksLikeReport,
   uniqueReports,
 } from "./parts.ts";
-import { embedJson, reportPage } from "../report/page.ts";
+import { embedJson, nonceOf, reportPage } from "../report/page.ts";
 
 const report = (fingerprint: string, message = "boom") =>
   ({
@@ -15,14 +15,31 @@ const report = (fingerprint: string, message = "boom") =>
   }) as Report;
 
 const PLAYER = { script: "window.rrwebReplay = {};", style: ".x {}" };
+const NONCE = "00ff";
 
 describe("report page", () => {
   test("the page loads nothing: player and styles are inline", () => {
-    const page = reportPage([report("a")], "t", PLAYER);
-    expect(page).toContain("<script>window.rrwebReplay = {};</script>");
+    const page = reportPage([report("a")], "t", PLAYER, NONCE);
+    expect(page).toContain(
+      `<script nonce="${NONCE}">window.rrwebReplay = {};</script>`,
+    );
     expect(page).toContain("<style>.x {}</style>");
     expect(page).not.toMatch(/<(script|link|img)[^>]* (src|href)=/);
     expect(page).not.toMatch(/\bimport\(|jsdelivr/);
+  });
+
+  test("only the page's own scripts may run", () => {
+    const page = reportPage([report("a")], "t", PLAYER, NONCE);
+    expect(page).toContain(
+      `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${NONCE}';`,
+    );
+    const scripts = page.match(/<script[^>]*>/g) ?? [];
+    expect(scripts).toEqual([
+      '<script id="reports" type="application/json">',
+      `<script nonce="${NONCE}">`,
+      `<script nonce="${NONCE}">`,
+    ]);
+    expect(nonceOf(new Uint8Array([0, 255, 16]))).toBe("00ff10");
   });
 
   test("recorded markup cannot close the data script", () => {
@@ -33,7 +50,12 @@ describe("report page", () => {
   });
 
   test("the title is escaped", () => {
-    const page = reportPage([report("a")], `<img src=x onerror="1">`, PLAYER);
+    const page = reportPage(
+      [report("a")],
+      `<img src=x onerror="1">`,
+      PLAYER,
+      NONCE,
+    );
     expect(page).toContain(
       "<title>&lt;img src=x onerror=&quot;1&quot;&gt;</title>",
     );

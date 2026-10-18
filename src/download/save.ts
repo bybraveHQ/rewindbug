@@ -1,4 +1,4 @@
-import { reportPage } from "../report/page.ts";
+import { NONCE_BYTES, nonceOf, reportPage } from "../report/page.ts";
 import type { Report } from "../types.ts";
 
 const MAX_TITLE_LENGTH = 200;
@@ -20,7 +20,13 @@ export const save = async (reports: readonly Report[]): Promise<void> => {
     reports.length > 1
       ? `${reports.length} reports, newest: ${headline(newest)}`
       : headline(newest) || "rewindbug report";
-  const html = reportPage(reports, title.slice(0, MAX_TITLE_LENGTH), player);
+  const html = reportPage(
+    reports,
+    title.slice(0, MAX_TITLE_LENGTH),
+    player,
+    // getRandomValues, not randomUUID: it works on plain http pages too
+    nonceOf(crypto.getRandomValues(new Uint8Array(NONCE_BYTES))),
+  );
   const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
   const link = document.createElement("a");
   link.href = url;

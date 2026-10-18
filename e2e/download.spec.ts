@@ -74,6 +74,12 @@ test("the tester downloads every report as a page that plays offline", async ({
   viewer.on("request", (request) => {
     if (!request.url().startsWith("file:")) requests.push(request.url());
   });
+  // the page's Content-Security-Policy must not stop its own player
+  const blocked: string[] = [];
+  viewer.on("console", (message) => {
+    if (/content.security.policy|CSP/i.test(message.text()))
+      blocked.push(message.text());
+  });
   // Firefox and WebKit never fire load: the player's iframe stays open
   await viewer.goto(pathToFileURL(file).href, {
     waitUntil: "domcontentloaded",
@@ -98,7 +104,11 @@ test("the tester downloads every report as a page that plays offline", async ({
   await expect(viewer.locator("#headline")).toContainText("coupon broke");
   await expect(viewer.locator("#steps")).toContainText("Apply coupon");
   await expect(viewer.locator("#stage iframe")).toHaveCount(1);
+  await expect(
+    viewer.frameLocator("#stage iframe").getByText("Apply coupon"),
+  ).toBeAttached();
   expect(requests).toEqual([]);
+  expect(blocked).toEqual([]);
   await viewing.close();
 });
 
