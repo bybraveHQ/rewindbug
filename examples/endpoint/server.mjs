@@ -1,17 +1,25 @@
 // rewindbug endpoint example: one file, Node 22, no dependencies.
 // Receives the gzip-JSON reports the rewindbug SDK posts and stores them in
 // the folder layout rewindbug-mcp reads, so a coding agent can pick them up.
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import {
   mkdir,
   readdir,
   readFile,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
+import { pathToFileURL, URLSearchParams } from "node:url";
 import { createGunzip } from "node:zlib";
 
 const DEFAULT_PORT = 7358;
@@ -39,6 +47,15 @@ const GITHUB_MAX_PER_HOUR_ENV =
 // the viewer as a browser reaches it, without the view token, for the
 // recording link in an issue
 const PUBLIC_URL = process.env.REWINDBUG_PUBLIC_URL || "";
+// the screen at the moment of the error, rendered from the recording: the
+// optional rewindbug-mcp/screenshot with playwright next to this file
+const SCREENSHOT_MODULE =
+  process.env.REWINDBUG_SCREENSHOT_MODULE || "rewindbug-mcp/screenshot";
+// a stand on this machine (localhost) may draw its own styles. Off by
+// default: behind a proxy the server listens on loopback while anyone with
+// the public write token can name any page in a report
+const SCREENSHOT_LOCAL_STAND =
+  process.env.REWINDBUG_SCREENSHOT_LOCAL_STAND === "1";
 
 const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024;
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -63,6 +80,9 @@ const PATH = TOKEN ? `/report/${TOKEN}` : "/report";
 const VIEW_PATH = "/view";
 const VIEW_TOKEN_FILE = join(DIR, "view-token");
 const VIEW_TOKEN_BYTES = 32;
+// an issue waits this long for its picture, then goes without it
+const ISSUE_SCREENSHOT_WAIT_MS = 10_000;
+const SCREENSHOT_KEY_CHARS = 32;
 // a page on another site must not write to a server on this machine; with
 // no REWINDBUG_ORIGIN only pages served from loopback may post to loopback
 const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
@@ -85,6 +105,8 @@ const expected = digest(PATH);
 // set at start: REWINDBUG_VIEW_TOKEN, else one kept in the folder on
 // loopback; empty beyond loopback without the variable, reading is then off
 let viewToken = "";
+// set at start when the renderer module is there
+let renderer = null;
 const VIEWER = new URL("viewer.html", import.meta.url);
 
 // 2026-10-16T12:00:00.123Z -> 20261016T120000123Z
@@ -190,6 +212,7 @@ const save = async (report, text, receivedAt) => {
   for (const name of excess) {
     await removeFile(join(REPORTS, `${name}.summary.json`));
     await removeFile(join(REPORTS, `${name}.json`));
+    await removeFile(join(REPORTS, `${name}.png`));
   }
   return base;
 };
@@ -208,10 +231,19 @@ const toGithub = (report, base) => {
     });
 };
 
+const exists = (path) =>
+  stat(path).then(
+    () => true,
+    () => false,
+  );
+
 let queue = Promise.resolve();
 const saveInOrder = (report, text, receivedAt) => {
   const done = queue.then(async () => {
     const base = await save(report, text, receivedAt);
+    // in the background: the SDK gets its answer before the picture
+    if (renderer && !(await exists(join(REPORTS, `${base}.png`))))
+      renderer.enqueue(join(REPORTS, `${base}.json`));
     if (GITHUB_REPO) toGithub(report, base);
   });
   queue = done.catch(() => undefined);
@@ -357,6 +389,7 @@ const list = async () => {
         name,
         automated: AUTOMATED.test(context?.userAgent ?? ""),
         issue: issues?.[summary.fingerprint]?.url,
+        screenshot: await exists(join(REPORTS, `${name}.png`)),
       });
     } catch {
       // a pair being replaced or removed right now is not listed
@@ -415,6 +448,19 @@ const pathOf = (url) => {
   }
 };
 
+// a picture in an issue is fetched by GitHub's image proxy, which sends no
+// header: its link carries a key that opens this one picture and nothing else
+const screenshotKey = (base) =>
+  createHmac("sha256", viewToken)
+    .update(base)
+    .digest("hex")
+    .slice(0, SCREENSHOT_KEY_CHARS);
+
+const screenshotLine = (base, shown) =>
+  shown && PUBLIC_URL && viewToken
+    ? `![Screen at the moment of the error](${PUBLIC_URL.replace(/\/+$/, "")}/${base}.png?key=${screenshotKey(base)})`
+    : "";
+
 const recordingLink = (base) =>
   PUBLIC_URL
     ? `${PUBLIC_URL}#report=${base}`
@@ -460,13 +506,15 @@ const fence = (text, lang = "") => {
 const cut = (text, max) =>
   text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
-const issueBody = (report, base) => {
+const issueBody = (report, base, screenshot = false) => {
   const { context, trigger } = report;
+  const picture = screenshotLine(base, screenshot);
   const head = [
     `**Page:** ${code(cut(context.url, ISSUE_FIELD_MAX))}`,
     `**When:** ${new Date(report.createdAt).toISOString()}`,
     `**Browser:** ${code(cut(String(context.userAgent), ISSUE_FIELD_MAX))}`,
     `**Recording:** ${recordingLink(base)}`,
+    ...(picture ? ["", picture] : []),
     "",
     "## Steps",
     fence(cut(report.stepsMarkdown || "none", ISSUE_BLOCK_MAX)),
@@ -516,11 +564,21 @@ const issueBody = (report, base) => {
   return bodies.find((body) => body.length <= ISSUE_BODY_MAX) ?? bodies.at(-1);
 };
 
-const repeatComment = (report, base) =>
+const repeatComment = (report, base, screenshot = false) =>
   [
     `Seen again at ${new Date(report.createdAt).toISOString()} on ${code(cut(report.context.url, ISSUE_FIELD_MAX))}, ${report.steps.length} steps.`,
     `**Recording:** ${recordingLink(base)}`,
-  ].join("\n");
+    screenshotLine(base, screenshot),
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+// the picture may still be rendering: an issue waits for it a little
+const screenshotReady = async (base) => {
+  const path = join(REPORTS, `${base}.json`);
+  await renderer?.wait(path, ISSUE_SCREENSHOT_WAIT_MS);
+  return exists(join(REPORTS, `${base}.png`));
+};
 
 const github = async (path, body) => {
   const response = await fetch(`${GITHUB_API}${path}`, {
@@ -552,9 +610,10 @@ const notifyGithub = async (report, base) => {
   const known = issues[report.fingerprint];
   if (isObject(known) && known.ids?.includes(report.id)) return;
   if (!githubAllowed(report)) return;
+  const screenshot = await screenshotReady(base);
   if (isObject(known) && Number.isSafeInteger(known.number)) {
     await github(`/repos/${GITHUB_REPO}/issues/${known.number}/comments`, {
-      body: repeatComment(report, base),
+      body: repeatComment(report, base, screenshot),
     });
     remember(known, report.id);
     await writeIssues(issues);
@@ -563,7 +622,7 @@ const notifyGithub = async (report, base) => {
   }
   const issue = await github(`/repos/${GITHUB_REPO}/issues`, {
     title: issueTitle(report),
-    body: issueBody(report, base),
+    body: issueBody(report, base, screenshot),
     labels: GITHUB_LABELS,
   });
   const entry = {
@@ -593,6 +652,26 @@ const view = async (request, response, rest) => {
     }
     response.setHeader("referrer-policy", "no-referrer");
     return send(response, 200, "text/html; charset=utf-8", page);
+  }
+  const [path, query = ""] = rest.split("?", 2);
+  if (path.startsWith("/") && path.endsWith(".png")) {
+    const name = path.slice(1, -".png".length);
+    const key = new URLSearchParams(query).get("key") ?? "";
+    const keyed =
+      NAME.test(name) &&
+      timingSafeEqual(digest(key), digest(screenshotKey(name)));
+    if (!keyed && !authorized(request.headers.authorization)) {
+      response.setHeader("www-authenticate", "Bearer");
+      return send(response, 401, "text/plain", "");
+    }
+    if (!NAME.test(name)) return send(response, 404, "text/plain", "");
+    const png = await readFile(join(REPORTS, `${name}.png`)).catch(() => null);
+    if (png === null) return send(response, 404, "text/plain", "");
+    response.setHeader("x-content-type-options", "nosniff");
+    // a new view token turns the keyed links off; GitHub's image proxy may
+    // still hold a copy it fetched before
+    response.setHeader("cache-control", "no-store");
+    return send(response, 200, "image/png", png);
   }
   if (!authorized(request.headers.authorization)) {
     response.setHeader("www-authenticate", "Bearer");
@@ -733,9 +812,59 @@ const loopbackViewToken = async () => {
   return fresh;
 };
 
+// next to this file or in the working folder; missing — reports go without
+// a picture
+const loadRenderer = async () => {
+  for (const base of [
+    import.meta.url,
+    pathToFileURL(join(process.cwd(), "package.json")).href,
+  ]) {
+    let path;
+    try {
+      path = createRequire(base).resolve(SCREENSHOT_MODULE);
+    } catch {
+      continue;
+    }
+    try {
+      const { createRenderer } = await import(pathToFileURL(path).href);
+      return createRenderer({ dir: DIR, privateStand: SCREENSHOT_LOCAL_STAND });
+    } catch (error) {
+      log(`cannot load ${SCREENSHOT_MODULE}: ${error.message}`);
+      return null;
+    }
+  }
+  log(
+    "screenshots off: install rewindbug-mcp and playwright next to server.mjs for a PNG of each bug",
+  );
+  return null;
+};
+
+// leftovers of a crash or of a picture that outlived its report
+const ORPHAN_AGE_MS = 60 * 60_000;
+const cleanOrphans = async () => {
+  const files = await readdir(REPORTS).catch(() => []);
+  const reports = new Set(
+    files
+      .filter((file) => file.endsWith(".json"))
+      .map((file) => file.slice(0, -".json".length)),
+  );
+  for (const file of files) {
+    const orphan =
+      file.endsWith(".tmp") ||
+      (file.endsWith(".png") && !reports.has(file.slice(0, -".png".length)));
+    if (!orphan) continue;
+    const path = join(REPORTS, file);
+    const info = await stat(path).catch(() => null);
+    if (info && Date.now() - info.mtimeMs > ORPHAN_AGE_MS)
+      await removeFile(path).catch(() => undefined);
+  }
+};
+
 await mkdir(REPORTS, { recursive: true, mode: 0o700 });
+await cleanOrphans();
 viewToken =
   VIEW_TOKEN_ENV || (LOOPBACK.has(HOST) ? await loopbackViewToken() : "");
+renderer = await loadRenderer();
 server.listen(PORT, HOST, () => {
   const { port } = server.address();
   const shown = TOKEN ? PATH.replace(TOKEN, "<REWINDBUG_TOKEN>") : PATH;
@@ -753,7 +882,10 @@ server.listen(PORT, HOST, () => {
 const shutdown = () => {
   if (githubPending > 0)
     log(`stopping with ${githubPending} reports not yet sent to GitHub`);
-  server.close(() => process.exit(0));
+  server.close(async () => {
+    await renderer?.close();
+    process.exit(0);
+  });
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

@@ -585,3 +585,81 @@ test("github settings are checked at start", async () => {
       /server exited: 1/,
     );
 });
+
+// stands in for rewindbug-mcp/screenshot: writes a fixed PNG next to the
+// report a moment later, the way the real renderer does in the background
+// synthetic-image-ok: a format stub for the renderer contract, never shown as a picture
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+const fakeRenderer = async () => {
+  const dir = await mkdtemp(join(tmpdir(), "rewindbug-renderer-"));
+  started.push({ child: { kill: () => undefined }, dir });
+  const path = join(dir, "renderer.mjs");
+  await writeFile(
+    path,
+    `import { writeFile } from "node:fs/promises";
+const PNG = Buffer.from(${JSON.stringify([...PNG])});
+export const createRenderer = () => {
+  const jobs = new Map();
+  return {
+    enqueue(path) {
+      jobs.set(path, new Promise((done) => setTimeout(done, 200)).then(() =>
+        writeFile(path.replace(/\\.json$/, ".png"), PNG)));
+    },
+    async wait(path) { await jobs.get(path); },
+    async close() {},
+  };
+};
+`,
+  );
+  return path;
+};
+
+test("a rendered picture goes into the issue by a keyed link that opens only it", async () => {
+  const hub = await fakeGithub();
+  const { dir, url } = await start({
+    ...withGithub(hub),
+    REWINDBUG_PUBLIC_URL: "https://bugs.example/view/",
+    REWINDBUG_SCREENSHOT_MODULE: await fakeRenderer(),
+  });
+  assert.equal((await post(url, JSON.stringify(fixture))).status, 204);
+  await waitFor(() => hub.calls.length === 1);
+  const match =
+    /!\[Screen at the moment of the error\]\(https:\/\/bugs\.example\/view\/(\d{8}T\d{9}Z-[0-9a-f-]{36})\.png\?key=([0-9a-f]{32})\)/.exec(
+      hub.calls[0].body.body,
+    );
+  assert.ok(match, hub.calls[0].body.body);
+  const [, name, key] = match;
+
+  // GitHub's image proxy sends no header: the key alone opens this picture
+  const keyed = await fetch(`${viewOf(url)}/${name}.png?key=${key}`);
+  assert.equal(keyed.status, 200);
+  assert.equal(keyed.headers.get("content-type"), "image/png");
+  assert.deepEqual(Buffer.from(await keyed.arrayBuffer()), PNG);
+  const wrong = await fetch(`${viewOf(url)}/${name}.png?key=${"0".repeat(32)}`);
+  assert.equal(wrong.status, 401);
+  assert.equal((await fetch(`${viewOf(url)}/${name}.png`)).status, 401);
+  // the key does not open the report itself
+  assert.equal(
+    (await fetch(`${viewOf(url)}/${name}.json?key=${key}`)).status,
+    401,
+  );
+  // the viewer reads it with the view token
+  const token = viewTokenOf(dir);
+  assert.equal((await read(url, `/${name}.png`, token)).status, 200);
+  assert.equal((await read(url, "/../issues.png", token)).status, 404);
+  const listed = await (await read(url, "/list", token)).json();
+  assert.equal(listed[0].screenshot, true);
+});
+
+test("without the renderer module: one log line, issues without a picture", async () => {
+  const hub = await fakeGithub();
+  const { url, logs } = await start({
+    ...withGithub(hub),
+    REWINDBUG_PUBLIC_URL: "https://bugs.example/view",
+    REWINDBUG_SCREENSHOT_MODULE: "rewindbug-no-such-module/screenshot",
+  });
+  assert.equal((await post(url, JSON.stringify(fixture))).status, 204);
+  await waitFor(() => hub.calls.length === 1);
+  assert.doesNotMatch(hub.calls[0].body.body, /!\[Screen/);
+  assert.match(logs(), /screenshots off: install rewindbug-mcp and playwright/);
+});

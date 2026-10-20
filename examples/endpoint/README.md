@@ -52,28 +52,42 @@ The SDK gets its answer as soon as the report is on disk; GitHub is called after
 
 `REWINDBUG_PUBLIC_URL` is the viewer's address without the token: the link in an issue opens the report after the viewer asks for the view token. Without it the issue names the report file.
 
+With a picture of the error rendered (see [Screenshots](#screenshots)) and `REWINDBUG_PUBLIC_URL` set, the issue and each repeat comment show it. GitHub fetches pictures through its image proxy with no header, so the link carries a key for that one picture, made from the view token: it opens nothing else, and a new view token turns all such links off, though GitHub's image proxy may keep a copy it fetched before. The issue waits up to 10 seconds for the picture. The renderer reaches no private address at all, not even one a report names as its own page: the write token is public, and behind a proxy the server listens on loopback while anyone can post. For a stand on this machine, such as `http://localhost:3000`, set `REWINDBUG_SCREENSHOT_LOCAL_STAND=1` to let it draw its own styles: only that origin, and only on loopback.
+
+## Screenshots
+
+Install the renderer next to `server.mjs` and every report gets a PNG of the screen at the moment of the error, `<received>-<id>.png` in `reports/`:
+
+```bash
+npm i rewindbug-mcp playwright && npx playwright install chromium
+```
+
+The SDK gets its answer first; the picture is rendered in the background from the recording, one report at a time. Without the two packages the server logs `screenshots off` once and works as before; the Docker image has neither. The viewer reads a picture at `/view/<name>.png` with the view token. What the renderer loads and what it never does: [rewindbug-mcp, A picture of the error](../../packages/mcp/README.md#a-picture-of-the-error).
+
 ## Settings
 
-| Variable                        | Default                            | Meaning                                                                                                                |
-| ------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `PORT`                          | `7358`                             | `0` picks a free port                                                                                                  |
-| `HOST`                          | `127.0.0.1`                        | `0.0.0.0` in the Docker image                                                                                          |
-| `REWINDBUG_DIR`                 | `.rewindbug` in the working folder | reports go to `reports/` inside it                                                                                     |
-| `REWINDBUG_TOKEN`               | none                               | the path becomes `/report/<token>`; required beyond loopback                                                           |
-| `REWINDBUG_OPEN`                | none                               | `1` lets the server listen beyond loopback without a token                                                             |
-| `REWINDBUG_VIEW_TOKEN`          | made on loopback, in `view-token`  | the token for reading reports; required beyond loopback; must differ from `REWINDBUG_TOKEN`                            |
-| `REWINDBUG_ORIGIN`              | `*`                                | `Access-Control-Allow-Origin`: your app's origin in production; with `*` on loopback only pages from loopback may post |
-| `REWINDBUG_GITHUB_REPO`         | none                               | `owner/name`: open an issue for every new bug                                                                          |
-| `REWINDBUG_GITHUB_TOKEN`        | none                               | token with Issues: write; required with `REWINDBUG_GITHUB_REPO`                                                        |
-| `REWINDBUG_GITHUB_LABELS`       | `bug`                              | labels for new issues, comma-separated                                                                                 |
-| `REWINDBUG_GITHUB_MAX_PER_HOUR` | `20`                               | issues and comments at most per hour; reports past it stay on disk only                                                |
-| `REWINDBUG_PUBLIC_URL`          | none                               | the viewer as browsers reach it, without the token, for the recording link in issues                                   |
+| Variable                           | Default                            | Meaning                                                                                                                |
+| ---------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                             | `7358`                             | `0` picks a free port                                                                                                  |
+| `HOST`                             | `127.0.0.1`                        | `0.0.0.0` in the Docker image                                                                                          |
+| `REWINDBUG_DIR`                    | `.rewindbug` in the working folder | reports go to `reports/` inside it                                                                                     |
+| `REWINDBUG_TOKEN`                  | none                               | the path becomes `/report/<token>`; required beyond loopback                                                           |
+| `REWINDBUG_OPEN`                   | none                               | `1` lets the server listen beyond loopback without a token                                                             |
+| `REWINDBUG_VIEW_TOKEN`             | made on loopback, in `view-token`  | the token for reading reports; required beyond loopback; must differ from `REWINDBUG_TOKEN`                            |
+| `REWINDBUG_ORIGIN`                 | `*`                                | `Access-Control-Allow-Origin`: your app's origin in production; with `*` on loopback only pages from loopback may post |
+| `REWINDBUG_GITHUB_REPO`            | none                               | `owner/name`: open an issue for every new bug                                                                          |
+| `REWINDBUG_GITHUB_TOKEN`           | none                               | token with Issues: write; required with `REWINDBUG_GITHUB_REPO`                                                        |
+| `REWINDBUG_GITHUB_LABELS`          | `bug`                              | labels for new issues, comma-separated                                                                                 |
+| `REWINDBUG_GITHUB_MAX_PER_HOUR`    | `20`                               | issues and comments at most per hour; reports past it stay on disk only                                                |
+| `REWINDBUG_PUBLIC_URL`             | none                               | the viewer as browsers reach it, without the token, for the recording link and the picture in issues                   |
+| `REWINDBUG_SCREENSHOT_LOCAL_STAND` | none                               | `1` lets a stand on this machine draw its own styles in pictures; only for a server nobody else can post to            |
+| `REWINDBUG_SCREENSHOT_MODULE`      | `rewindbug-mcp/screenshot`         | the module that renders pictures, resolved next to `server.mjs` or in the working folder                               |
 
 Beyond loopback the server does not start without a token, unless `REWINDBUG_OPEN=1` says that anyone who reaches the port may write reports. On loopback it answers `421` to any `Host` but `127.0.0.1` and `localhost`, so a page from another site cannot reach it through DNS rebinding, and `403` to a post from a page that is not itself on loopback, unless `REWINDBUG_ORIGIN` names your app.
 
 ## What it stores
 
-Each report is a pair in `reports/`: `<received>-<id>.json`, the full report with the rrweb recording, and `<received>-<id>.summary.json`, a short summary for listings. The last 100 reports are kept, a report sent again replaces its older copy. The report format: [Report format](../../README.md#report-format). `issues.json` next to `reports/` maps fingerprints to GitHub issues.
+Each report is a pair in `reports/`: `<received>-<id>.json`, the full report with the rrweb recording, and `<received>-<id>.summary.json`, a short summary for listings, plus `<received>-<id>.png` when a picture was rendered. The last 100 reports are kept; a report sent again under the same id keeps the first copy. The report format: [Report format](../../README.md#report-format). `issues.json` next to `reports/` maps fingerprints to GitHub issues.
 
 To hand the reports to a coding agent, start `rewindbug-mcp` with the same folder in `REWINDBUG_DIR`. Its own receiver is then not needed, but it does no harm.
 
