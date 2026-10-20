@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.1 — 2026-10-20
+
+- `defaultUrlFilter` masks the query in one pass: masking each secret parameter with `searchParams.set` re-serialized the whole query every time, so a page holding one long crafted url could stall every visitor's tab at each replay checkpoint. A url over 8 KiB is cut before it is read, and what lies past the cut is dropped.
+- A secret inside another parameter's value is masked too: a redirect target such as `next=/x?token=S`, an encoded nested url, a `;` separated pair.
+
+## rewindbug-mcp 0.3.0 — 2026-10-20
+
+A picture of the error for the agent and the bug tracker.
+
+- Each report gets a PNG of the screen at the moment of the error: the server plays the recording back to the trigger in a headless Chromium of the project's own Playwright and saves `<received>-<id>.png` next to the report. The page gets its answer first; the picture follows in the background, one report at a time. Without Playwright reports come as before, with one log line.
+- `last_bug` and `get_bug` attach the picture as an image with its path in `bug.screenshot`; `list_bugs` has `screenshot`. A call about a report that is still rendering waits up to 3 seconds.
+- The server itself fetches the page's styles, fonts and images by `GET`, without cookies, from the address it checked, with no redirects followed, six at a time, at most 100 resources and 20 MiB per picture; the browser itself is cut off from the network and never runs the page's scripts. No private address is reached but the own origin of a stand on this machine: in `rewindbug-mcp` always, in `examples/endpoint` only with `REWINDBUG_SCREENSHOT_LOCAL_STAND=1`.
+- New entry `rewindbug-mcp/screenshot` for other receivers. `playwright` is an optional peer dependency.
+- `examples/endpoint`: the same picture with `rewindbug-mcp` and `playwright` installed next to it, in the GitHub issue by a link with a key for that one picture, and at `/view/<name>.png` for the viewer.
+
 ## 0.5.0 — 2026-10-20
 
 What rolling rewindbug out to several QA suites showed was missing.
