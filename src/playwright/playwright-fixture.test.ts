@@ -4,9 +4,11 @@ import {
   failureOf,
   initScript,
   looksLikeReport,
+  maskPattern,
   uniqueReports,
 } from "./parts.ts";
 import { embedJson, nonceOf, reportPage } from "../report/page.ts";
+import { defaultUrlFilter } from "../shared/url-filter.ts";
 
 const report = (fingerprint: string, message = "boom") =>
   ({
@@ -111,7 +113,47 @@ describe("fixture parts", () => {
       maskSelector: ".secret",
     });
     expect(script).toContain('"maskSelector":".secret"');
-    expect(script).not.toMatch(/bufferSeconds|attach/);
+    expect(script).not.toMatch(/bufferSeconds|attach|urlFilter/);
     expect(script).toContain("beforeSend");
+  });
+
+  test("maskParams masks the named values only, names taken literally", () => {
+    const pattern = maskPattern(["x-vercel-protection-bypass", "a.b", ""]);
+    expect(pattern).toBeDefined();
+    const mask = (url: string) =>
+      url.replace(new RegExp(pattern ?? "", "gi"), "$1*");
+    expect(
+      mask("https://s.dev/p?x=1&X-Vercel-Protection-Bypass=tok&page=2"),
+    ).toBe("https://s.dev/p?x=1&X-Vercel-Protection-Bypass=*&page=2");
+    expect(mask("https://s.dev/p;a.b=1?aXb=2")).toBe(
+      "https://s.dev/p;a.b=*?aXb=2",
+    );
+    expect(maskPattern([])).toBeUndefined();
+    expect(maskPattern([""])).toBeUndefined();
+  });
+
+  test("a bracketed name is masked after the default filter re-encodes the query", () => {
+    const pattern = maskPattern(["auth[token]"]);
+    const mask = (url: string) =>
+      defaultUrlFilter(url).replace(new RegExp(pattern ?? "", "gi"), "$1*");
+    // `code` is a default secret: masking it re-serializes auth[token]
+    expect(mask("https://s.dev/api?auth[token]=SECRET&code=xyz&p=1")).toBe(
+      "https://s.dev/api?auth%5Btoken%5D=*&code=*&p=1",
+    );
+    expect(mask("https://s.dev/api?auth[token]=SECRET&p=1")).toBe(
+      "https://s.dev/api?auth[token]=*&p=1",
+    );
+  });
+
+  test("maskParams reaches init as a filter over the default one", () => {
+    const script = initScript("var rewindbug = {};", {
+      maskParams: ['a"); alert(1); ("'],
+    });
+    const line = script.split("\n").find((l) => l.includes("urlFilter")) ?? "";
+    expect(line).toMatch(
+      /^\s*urlFilter: \(url, filter\) => filter\(url\)\.replace\(new RegExp\("/,
+    );
+    // the name is data inside a JSON string, never code
+    expect(line).not.toContain('a"); alert');
   });
 });

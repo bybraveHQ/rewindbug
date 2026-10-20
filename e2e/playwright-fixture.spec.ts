@@ -117,6 +117,50 @@ test("a failed test gets the report with the recording", async ({
   expect(passed?.files.size).toBe(0);
 });
 
+test("a context from browser.newContext() reports through withRewindbug; maskParams masks URLs", async ({
+  browserName,
+}) => {
+  const source = `
+import { expect, test, withRewindbug } from ${JSON.stringify(FIXTURE)};
+
+test.use({ browserName: ${JSON.stringify(browserName)}, rewindbug: { maskParams: ["x-vercel-protection-bypass"] } });
+
+test("helper context", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL });
+  expect(await withRewindbug(context)).toBe(true);
+  const page = await context.newPage();
+  await page.goto("/plain-checkout.html?x-vercel-protection-bypass=tok-secret-1");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByText("Coupon applied")).toBeVisible({ timeout: 1000 });
+});
+`;
+  const run = await runGenerated(source, ORIGIN, {
+    reporter: "json",
+    read: results,
+  });
+  expect(run.status, run.output).toBe(1);
+  const failed = run.read?.get("helper context");
+  expect(failed?.status).toBe("failed");
+  const names = [...(failed?.files.keys() ?? [])];
+  expect(names).toContain("rewindbug-1.json");
+  const reports = names
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => JSON.parse(failed?.files.get(name) ?? "null") as Report);
+  expect(reports[0]?.trigger.message).toMatch(/^expect\(locator\)/);
+  expect(reports[0]?.context.url).toContain("x-vercel-protection-bypass=*");
+  for (const file of failed?.files.values() ?? [])
+    expect(file).not.toContain("tok-secret-1");
+});
+
+test("withRewindbug outside a test does nothing", async ({ browser }) => {
+  const { withRewindbug } = (await import(FIXTURE)) as {
+    withRewindbug: (context: unknown) => Promise<boolean>;
+  };
+  const context = await browser.newContext();
+  expect(await withRewindbug(context)).toBe(false);
+  await context.close();
+});
+
 test("attach: always puts page errors on passing tests", async ({
   browserName,
 }) => {

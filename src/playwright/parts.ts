@@ -9,6 +9,10 @@ export type RewindbugOptions = {
   maskInputs?: boolean;
   maskSelector?: string;
   consoleErrorTrigger?: boolean;
+  // query parameter names masked in report URLs on top of the default
+  // filter, such as a deployment protection token; names, not a function:
+  // the options cross into the page as text
+  maskParams?: string[];
 };
 
 export const BINDING = "__rewindbugReport";
@@ -17,6 +21,24 @@ const ENDPOINT = "http://rewindbug.invalid/report";
 export const FAILURE_NAME = "PlaywrightTestFailure";
 // eslint-disable-next-line no-control-regex -- ANSI colors in Playwright errors
 const ANSI = /\u001b\[[0-9;]*m/g;
+
+const escapeRegExp = (text: string): string =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// a name as the page wrote it and as the default filter re-serializes it:
+// masking a secret parameter rewrites the query, so auth[token] becomes
+// auth%5Btoken%5D and the literal name alone would miss it
+const nameForms = (name: string): string[] => [
+  ...new Set([name, new URLSearchParams([[name, ""]]).toString().slice(0, -1)]),
+];
+
+// the value of each named parameter, in the query or after ";"
+export const maskPattern = (names: readonly string[]): string | undefined => {
+  const valid = names.filter((name) => typeof name === "string" && name);
+  if (!valid.length) return undefined;
+  const forms = valid.flatMap(nameForms).map(escapeRegExp).join("|");
+  return `([?&;](?:${forms})=)[^&#;?]*`;
+};
 
 // the page side: the iife build, init in the top frame, reports handed to
 // Node instead of the network
@@ -37,6 +59,10 @@ export const initScript = (
       consoleErrorTrigger: options.consoleErrorTrigger,
     }),
   };
+  const mask = maskPattern(options.maskParams ?? []);
+  const urlFilter = mask
+    ? `urlFilter: (url, filter) => filter(url).replace(new RegExp(${JSON.stringify(mask)}, "gi"), "$1*"),`
+    : "";
   return `(() => {
   if (window !== window.top || window.__rewindbug) return;
   const send = window.${BINDING};
@@ -45,6 +71,7 @@ export const initScript = (
   const pending = new Set();
   rewindbug.init({
     ...${JSON.stringify(init)},
+    ${urlFilter}
     beforeSend: (report) => {
       const done = Promise.resolve(send(report)).catch(() => undefined);
       pending.add(done);
