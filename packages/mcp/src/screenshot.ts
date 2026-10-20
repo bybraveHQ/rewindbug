@@ -33,6 +33,7 @@ const MAX_RENDER_BYTES = 20 * 1024 * 1024;
 // this times the fetch timeout (security scan 14, 20-10-2026)
 export const MAX_RESOURCES = 100;
 const LAUNCH_TIMEOUT_MS = 30_000;
+const MAX_FAILURE_CHARS = 200;
 // Chromium itself reaches nothing: every request is answered from Node, so
 // a dead proxy and a resolver that knows no name stop what the page could
 // still start on its own, such as preconnect and DNS prefetch hints
@@ -550,7 +551,13 @@ export const shoot = async (
       timeout: MAX_RENDER_MS,
     });
     const failed = await page.evaluate<string | undefined>("window.__failed");
-    if (failed) throw new Error(`the player failed: ${failed}`);
+    // the message comes from the page's own recording: one line, bounded,
+    // control characters escaped, so it cannot forge a log line or drive
+    // the operator's terminal
+    if (failed)
+      throw new Error(
+        `the player failed: ${JSON.stringify([...failed].slice(0, MAX_FAILURE_CHARS).join(""))}`,
+      );
     // styles, fonts and images of the stand: wait until the network is quiet
     const started = Date.now();
     while (

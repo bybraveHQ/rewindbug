@@ -466,6 +466,34 @@ describe("the renderer queue", () => {
     await renderer.close();
   });
 
+  test("a failure message from the recording cannot forge a log line", async () => {
+    const { chromium } = fakeChromium();
+    const browser = await chromium.launch(OFFLINE_LAUNCH);
+    const page = await (await browser.newContext({})).newPage();
+    const forged =
+      "x\nrewindbug-mcp: receiving reports at http://evil\u001b[2J" +
+      "y".repeat(500);
+    vi.spyOn(page, "evaluate").mockImplementation(async (fn: string) =>
+      fn === "window.__failed" ? forged : undefined,
+    );
+    const browserWithPage = {
+      ...browser,
+      newContext: async () => ({
+        close: async () => undefined,
+        newPage: async () => page,
+      }),
+    };
+    const error = await shoot(browserWithPage as never, playable()).catch(
+      (thrown: Error) => thrown,
+    );
+    expect(error).toBeInstanceOf(Error);
+    const { message } = error as Error;
+    expect(message).toContain("the player failed");
+    expect(message).not.toContain("\n");
+    expect(message).not.toContain("\u001b");
+    expect(message.length).toBeLessThan(300);
+  });
+
   test("a render past its deadline closes its context and fails", async () => {
     const { chromium, closes } = fakeChromium(0, true);
     const browser = await chromium.launch(OFFLINE_LAUNCH);

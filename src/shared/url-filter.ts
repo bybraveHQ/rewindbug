@@ -29,7 +29,8 @@ const maskPairs = (text: string): string =>
   );
 
 // a secret inside another parameter's value: a redirect target, a nested
-// url, a ; separated pair. The scan is flat, so any depth is covered
+// url, a ; separated pair. The value is decoded once, as the browser does:
+// a secret encoded twice (%253Ftoken%253D) is left as its sender wrote it
 const maskValue = (value: string): string =>
   value.includes("=") ? maskPairs(`?${value}`).slice(1) : value;
 
