@@ -127,11 +127,15 @@ describe("startReport", () => {
     });
     await reporter.flush();
     const reports = await sent();
-    expect(reports.map((report) => report.trigger.message)).toEqual([
+    // the two reports are compressed in parallel: no fixed send order
+    expect(reports.map((report) => report.trigger.message).sort()).toEqual([
       "Cannot read name",
       "other",
     ]);
-    expect(reports[0]?.fingerprint).not.toBe(reports[0]?.id);
+    const deduped = reports.find(
+      (r) => r.trigger.message === "Cannot read name",
+    );
+    expect(deduped?.fingerprint).not.toBe(deduped?.id);
   });
 
   test("network triggers fingerprint the request they point to", async () => {
