@@ -58,6 +58,42 @@ A page without a bundler imports the single-file build `dist/rewindbug.browser.j
 
 The token lives in `.rewindbug/token`. Delete the file and restart the server to get a new one.
 
+## The agent's browser
+
+The agent can browse your stand with [Playwright MCP](https://github.com/microsoft/playwright-mcp) and get its page errors as bugs, with no change to the app. Write an init-script once: it carries the browser build of rewindbug, starts it only on the hosts you name, before the page's own scripts, and sends to this server.
+
+```bash
+npm i -D rewindbug rewindbug-mcp
+REWINDBUG_DIR=$PWD/.rewindbug REWINDBUG_PORT=7357 npx rewindbug-mcp init-script --host stand.example.dev --host admin.example.dev
+```
+
+It writes `.rewindbug/init-script.js` with the same token and port the server uses, or `--out <file>`. `--host` takes a bare host name, `localhost` included; a URL with a login or a path is refused. `--mask-param <name>` masks one more query parameter in report URLs, such as `x-vercel-protection-bypass`. Run it again after you update `rewindbug` or change hosts. Then give Playwright MCP the file, in the project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "rewindbug": {
+      "command": "npx",
+      "args": ["-y", "rewindbug-mcp"],
+      "env": {
+        "REWINDBUG_DIR": "/absolute/path/to/project/.rewindbug",
+        "REWINDBUG_PORT": "7357"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--grant-permissions=local-network-access",
+        "--init-script=/absolute/path/to/project/.rewindbug/init-script.js"
+      ]
+    }
+  }
+}
+```
+
+`--grant-permissions=local-network-access` matters: Chrome lets a public page reach `127.0.0.1` only with the Local Network Access permission, and without it the report is dropped with no error. The file holds the token: keep it out of git together with `.rewindbug/`.
+
 ## Tools
 
 | Tool        | Returns                                                           |
@@ -84,7 +120,8 @@ The folder keeps the last 100 reports. Clean it by hand whenever you like.
 - **Second instance.** When the port is taken, the server only reads its folder and says so. Reports from another project go to the instance that owns the port. Use a separate `REWINDBUG_PORT` per project.
 - **Failed deliveries stay queued.** The SDK keeps a report in its queue on any non-2xx answer and retries on `flush()` and on tab close. A wrong token, a report over the limits or a clock more than 5 minutes ahead keeps it there until the endpoint is fixed.
 - **Console noise on tab close.** A report sent with `sendBeacon` on tab close is delivered. The browser still logs that the `*` CORS answer was rejected for a request with credentials.
-- **HTTPS dev server.** A browser may block requests from an `https://` page to `127.0.0.1` (Chrome Local Network Access, Safari mixed content). Check it on your setup.
+- **Local Network Access.** Chrome asks before a public or `https://` page reaches `127.0.0.1`; an automated browser has no one to ask and drops the request. Grant `local-network-access`: Playwright `permissions: ["local-network-access"]`, Playwright MCP `--grant-permissions=local-network-access`. Safari may block it as mixed content.
+- **Custom request headers.** The receiver accepts only `content-type` in CORS. A header added to every request, such as a deployment protection bypass in Playwright `extraHTTPHeaders`, also goes with the report and the preflight fails. Scope the header to your stand with `context.route` or trade it for the stand's cookie once.
 - **Containers.** Port forwarding from a devcontainer or WSL changes the `Host` header and the server answers `421`. Run the server in the same environment as the browser.
 - **Token in the agent's context.** `last_bug` returns the endpoint with the token while the folder is empty. A crafted report could make the agent repeat it. The token only guards writes to a folder on your machine: delete `.rewindbug/token` and restart to rotate it.
 

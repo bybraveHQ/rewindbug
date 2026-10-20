@@ -130,13 +130,13 @@ Import the single-file build, rrweb included, about 36 kB gzip:
 
 ```html
 <script type="module">
-  import { init } from "https://cdn.jsdelivr.net/npm/rewindbug@0.4/dist/rewindbug.browser.js";
+  import { init } from "https://cdn.jsdelivr.net/npm/rewindbug@0.5/dist/rewindbug.browser.js";
 
   init({ endpoint: "https://bugs.example.com/report" });
 </script>
 ```
 
-For a first try, run [`examples/endpoint`](examples/endpoint/README.md) from a clone of this repo and use `http://127.0.0.1:7358/report`. `@0.4` is for a first try: pin an exact version such as `@0.4.0` in production, the script sees the whole page. With a Content Security Policy, allow the CDN in `script-src`. With a bundler the same file is `rewindbug/browser`, but plain `rewindbug` is better there: it shares `@rrweb/record` with anything else that uses it.
+For a first try, run [`examples/endpoint`](examples/endpoint/README.md) from a clone of this repo and use `http://127.0.0.1:7358/report`. `@0.5` is for a first try: pin an exact version such as `@0.5.0` in production, the script sees the whole page. With a Content Security Policy, allow the CDN in `script-src`. With a bundler the same file is `rewindbug/browser`, but plain `rewindbug` is better there: it shares `@rrweb/record` with anything else that uses it.
 
 ### With a coding agent
 
@@ -159,6 +159,8 @@ if (endpoint) init({ endpoint });
 Add `.rewindbug/` to your app's `.gitignore`: it holds the token and the reports.
 
 From then on the same question gets the newest bug: the steps, the trigger, the console, the network and the test, without the recording.
+
+The agent's own browser can report too, with no change to the app: `npx rewindbug-mcp init-script --host <your stand>` writes a script for [Playwright MCP](https://github.com/microsoft/playwright-mcp) `--init-script`, and the stand's page errors land in the same folder. Chrome lets a public page reach `127.0.0.1` only with the Local Network Access permission: give Playwright MCP `--grant-permissions=local-network-access`, or the report is dropped with no error. The setup is in [the server's README](packages/mcp/README.md#the-agents-browser).
 
 ### In your Playwright tests
 
@@ -204,7 +206,22 @@ export default defineConfig<{ rewindbug: RewindbugOptions }>({
 });
 ```
 
-`maskInputs`, `maskSelector` and `consoleErrorTrigger` work as in [Options](#options). Typed values stay masked in the test reports too: a report attached to a CI run is as private as one from a user.
+`maskInputs`, `maskSelector` and `consoleErrorTrigger` work as in [Options](#options). Typed values stay masked in the test reports too: a report attached to a CI run is as private as one from a user. `maskParams: ["x-vercel-protection-bypass"]` masks more query parameters in the report's URLs on top of the default filter; it takes names, since the options cross into the page as text.
+
+A context the test makes itself, such as `browser.newContext()` in a login helper, has no rewindbug until you pass it to `withRewindbug`. Its page errors then go to the same failed test:
+
+```ts
+import { test, withRewindbug } from "rewindbug/playwright";
+
+test("admin sees the order", async ({ browser }) => {
+  const admin = await browser.newContext({ storageState: "admin.json" });
+  await withRewindbug(admin); // the test's options; pass your own as the second argument
+  const page = await admin.newPage();
+  // …
+});
+```
+
+Outside a test, in a global setup, `withRewindbug` does nothing and returns `false`.
 
 ### Without a server
 
@@ -222,7 +239,7 @@ Reports stay in the page, the last 10 of them, and nothing downloads on its own:
 - **the console:** `rewindbug.list()` prints a numbered table of the reports, `rewindbug.download(2)` saves report 2 alone, `rewindbug.download()` all of them. Chrome blocks pasting into the console until you type `allow pasting` there once; typing the command works as is;
 - **the app:** `download()` and `download(n)`, imported from `rewindbug/download`, for a button of its own.
 
-With no report yet, the moment of the call is captured first, so a bug without an error can be taken too. The file holds the recording, the steps, the test, the console, the network and the report JSON of each report, in one page that opens offline with a double click. Attach it to the bug. The rrweb player inside, about 64 kB gzip, loads with the first file, not with the page. Nothing is posted anywhere. `hotkey: false` turns the keys off. Without a bundler, import from `https://cdn.jsdelivr.net/npm/rewindbug@0.4/dist/download.browser.js`.
+With no report yet, the moment of the call is captured first, so a bug without an error can be taken too. The file holds the recording, the steps, the test, the console, the network and the report JSON of each report, in one page that opens offline with a double click. Attach it to the bug. The rrweb player inside, about 64 kB gzip, loads with the first file, not with the page. Nothing is posted anywhere. `hotkey: false` turns the keys off. Without a bundler, import from `https://cdn.jsdelivr.net/npm/rewindbug@0.5/dist/download.browser.js`.
 
 Take `capture` and `flush` from `rewindbug/download` too: an import of plain `rewindbug` next to it is a separate copy that `initDownload` did not start.
 
@@ -292,6 +309,16 @@ The SDK posts each report with `fetch` and `credentials: "omit"`. When the tab i
 - **To a coding agent:** [`rewindbug-mcp`](packages/mcp/README.md) receives reports on localhost and hands the last bug to Claude Code or Cursor over MCP. Register it as shown in [With a coding agent](#with-a-coding-agent).
 - **To a folder on a server:** [`examples/endpoint`](examples/endpoint/README.md), two files on Node with a Docker image. It writes the folder layout `rewindbug-mcp` reads, plays the recordings in the browser behind a token of its own and, with a repo and a token set, opens a GitHub issue for every new bug with the steps and the test.
 - **To a file, with no server:** `rewindbug/download` keeps reports in the page, and the tester saves one as a page that plays offline, see [Without a server](#without-a-server).
+- **To a page from Node:** `reportHtml(reports, title?)` from `rewindbug/html` turns report JSON, such as files read back from the `rewindbug-mcp` folder, into the same offline page with the player:
+
+  ```ts
+  import { readFile, writeFile } from "node:fs/promises";
+  import { reportHtml } from "rewindbug/html";
+
+  const report = JSON.parse(await readFile("report.json", "utf8"));
+  await writeFile("report.html", reportHtml([report]));
+  ```
+
 - **To your own backend:**
   - the body is gzip-compressed JSON sent as `text/plain`, without `Content-Encoding`: detect gzip by its first bytes `1f 8b`. The fields are in [Report format](#report-format);
   - on another origin, answer with `Access-Control-Allow-Origin`: without it the browser hides the answer, and the report stays queued and comes again;

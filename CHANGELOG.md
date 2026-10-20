@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0 — 2026-10-20
+
+What rolling rewindbug out to several QA suites showed was missing.
+
+### rewindbug
+
+- `rewindbug/playwright` exports `withRewindbug(context, options?)`: a context a test makes itself, such as `browser.newContext()` in a login helper, reports to the same failed test as the built-in one. Outside a test it does nothing and returns `false`.
+- `maskParams` in the fixture options masks more query parameters in report URLs, on top of the default filter: `maskParams: ["x-vercel-protection-bypass"]`.
+- New entry `rewindbug/html`: `reportHtml(reports, title?)` builds the offline report page with the player in Node or a browser, from report JSON such as the files of a `rewindbug-mcp` folder.
+
+### rewindbug-mcp 0.2.0
+
+- `rewindbug-mcp init-script --host <host>` writes the init-script for Playwright MCP `--init-script`: the browser build of rewindbug, started on the named hosts only and sending to this server on its token and port. `--mask-param` and `--out` as needed; a host with a login, a query or a path is refused.
+
+### Docs
+
+- Local Network Access: an automated Chrome drops a report from a public page to `127.0.0.1` unless `local-network-access` is granted.
+- A header added to every request, such as a deployment protection bypass in `extraHTTPHeaders`, fails the receiver's CORS preflight: scope it to the stand.
+
 ## 0.4.0 — 2026-10-18
 
 ### rewindbug
