@@ -87,6 +87,15 @@ export default defineConfig([
     noExternal: [/.*/],
     esbuildPlugins: [externalPlayer],
   },
+  // the report page for Node: reports read back from a folder become files
+  {
+    ...shared,
+    entry: { html: "src/html/index.ts" },
+    platform: "neutral",
+    dts: true,
+    sourcemap: false,
+    esbuildPlugins: [externalPlayer],
+  },
   {
     entry: { playwright: "src/playwright/index.ts" },
     // Playwright compiles specs to CommonJS unless the project is a module
