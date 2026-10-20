@@ -17,7 +17,21 @@ const LINE_COL_TAIL = /(:\d+){1,2}$/;
 const FALLBACK_BASE = "http://localhost/";
 // for a url the parser refuses: browsers quote exactly such urls in errors
 const USERINFO = /^([a-z][\w+.-]*:\/\/)[^/?#@\s]*@/i;
-const PAIR = /([?&#;])([^=&#?;\s]+)=([^&#;\s]*)/g;
+// a value ends at ? too: next=/x?token=S holds a pair of its own
+const PAIR = /([?&#;])([^=&#?;\s]+)=([^&#;?\s]*)/g;
+// a longer url is cut before anything else: page text can be any length,
+// and what lies past the cut is dropped rather than scanned (fails closed)
+const MAX_URL_CHARS = 8192;
+
+const maskPairs = (text: string): string =>
+  text.replace(PAIR, (pair, lead: string, name: string) =>
+    SECRET_PARAM.test(name) ? `${lead}${name}=${MASK}` : pair,
+  );
+
+// a secret inside another parameter's value: a redirect target, a nested
+// url, a ; separated pair. The scan is flat, so any depth is covered
+const maskValue = (value: string): string =>
+  value.includes("=") ? maskPairs(`?${value}`).slice(1) : value;
 
 export const pageBase = (): string =>
   globalThis.document?.baseURI ?? globalThis.location?.href ?? FALLBACK_BASE;
@@ -31,19 +45,29 @@ export const resolveUrl = (raw: string): URL | null => {
 };
 
 export const defaultUrlFilter: UrlFilter = (raw) => {
-  const url = resolveUrl(raw);
+  const text = raw.length > MAX_URL_CHARS ? raw.slice(0, MAX_URL_CHARS) : raw;
+  const url = resolveUrl(text);
   // fails closed: secrets are masked by pattern when the parser gives up
-  if (!url)
-    return raw
-      .replace(USERINFO, "$1")
-      .replace(PAIR, (pair, lead: string, name: string) =>
-        SECRET_PARAM.test(name) ? `${lead}${name}=${MASK}` : pair,
-      );
+  if (!url) return maskPairs(text.replace(USERINFO, "$1"));
   url.username = "";
   url.password = "";
-  for (const name of new Set(url.searchParams.keys())) {
-    if (SECRET_PARAM.test(name)) url.searchParams.set(name, MASK);
+  // one pass over the query and one serialization: set() per parameter
+  // re-serialized the whole query each time, quadratic on a long url
+  let changed = false;
+  const seen = new Set<string>();
+  const pairs: [string, string][] = [];
+  for (const [name, value] of url.searchParams) {
+    if (SECRET_PARAM.test(name)) {
+      changed = true;
+      if (!seen.has(name)) pairs.push([name, MASK]);
+      seen.add(name);
+      continue;
+    }
+    const masked = maskValue(value);
+    if (masked !== value) changed = true;
+    pairs.push([name, masked]);
   }
+  if (changed) url.search = new URLSearchParams(pairs).toString();
   if (url.hash.includes("=")) url.hash = "";
   return url.href;
 };

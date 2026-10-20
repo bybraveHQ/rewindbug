@@ -51,6 +51,49 @@ describe("defaultUrlFilter", () => {
     ).toBe("https://[bad/x?page=2&api_key=*#auth=*");
   });
 
+  test("masks a secret nested in another parameter's value", () => {
+    expect(defaultUrlFilter("https://a.com/login?next=/x?token=S&p=1")).toBe(
+      "https://a.com/login?next=%2Fx%3Ftoken%3D*&p=1",
+    );
+    expect(
+      defaultUrlFilter(
+        "https://a.com/?callbackUrl=https%3A%2F%2Fb%2F%3Ftoken%3DS%26q%3D1",
+      ),
+    ).not.toContain("S");
+    expect(defaultUrlFilter("https://a.com/?a=1;token=S")).toBe(
+      "https://a.com/?a=1%3Btoken%3D*",
+    );
+    expect(defaultUrlFilter("https://a.com/?cb=token%3DS")).toBe(
+      "https://a.com/?cb=token%3D*",
+    );
+    // the refused-url path too
+    expect(defaultUrlFilter("http://[bad/x?next=/y?token=S")).toBe(
+      "http://[bad/x?next=/y?token=*",
+    );
+  });
+
+  test("a secret name sent twice is masked once; a url without secrets stays as written", () => {
+    expect(defaultUrlFilter("https://a.com/?token=a&p=1&token=b")).toBe(
+      "https://a.com/?token=*&p=1",
+    );
+    expect(defaultUrlFilter("https://a.com/?q=a+b%20c&x=%2F")).toBe(
+      "https://a.com/?q=a+b%20c&x=%2F",
+    );
+  });
+
+  test("a long url is cut before it is parsed, and masked in one pass", () => {
+    const names = Array.from({ length: 7000 }, (_, i) => `a${i}-key=v${i}`);
+    const url = `https://x.example/?${names.join("&")}`;
+    const started = performance.now();
+    const out = defaultUrlFilter(url);
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(out.length).toBeLessThanOrEqual(8192 + 1);
+    expect(out).not.toMatch(/=v\d/);
+    // a secret past the cut is gone with the cut, not scanned
+    const tail = `https://x.example/?${"p=1&".repeat(3000)}token=S`;
+    expect(defaultUrlFilter(tail)).not.toContain("S");
+  });
+
   test("masks a refused url quoted in an error message", () => {
     const message =
       "Failed to construct 'WebSocket': The URL 'wss://rt.example.com:undefined/s?jwt=eyJ' is invalid.";
