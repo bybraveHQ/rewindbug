@@ -129,6 +129,26 @@ describe("saveReport and listSummaries", () => {
     expect(await readdir(reportsDir(root))).toHaveLength(MAX_REPORTS * 2);
   });
 
+  test("a screenshot shows in the list and goes with its report", async () => {
+    await save(report(1), NOW);
+    const dir = reportsDir(root);
+    const [first] = await listSummaries(root);
+    expect(first?.screenshot).toBe(false);
+    await writeFile(first?.path.replace(/\.json$/, ".png") ?? "", "png");
+    expect((await listSummaries(root))[0]?.screenshot).toBe(true);
+    // the same id again: the old pair and its picture go
+    await save(report(1), NOW + 5);
+    expect((await readdir(dir)).filter((f) => f.endsWith(".png"))).toEqual([]);
+    expect((await listSummaries(root))[0]?.screenshot).toBe(false);
+    // pruned by age: the picture goes with the pair
+    const [latest] = await listSummaries(root);
+    await writeFile(latest?.path.replace(/\.json$/, ".png") ?? "", "png");
+    for (let n = 2; n < MAX_REPORTS + 3; n++)
+      await save(report(n), NOW + 10 + n);
+    expect((await readdir(dir)).filter((f) => f.endsWith(".png"))).toEqual([]);
+    expect(await readdir(dir)).toHaveLength(MAX_REPORTS * 2);
+  });
+
   test("lists only complete pairs and skips temp files", async () => {
     await save(report(1), NOW);
     const dir = reportsDir(root);
@@ -175,13 +195,18 @@ describe("cleanOrphans", () => {
     const orphan = join(dir, `${stamp(NOW)}-${uuid(2)}.json`);
     const tmp = join(dir, `${stamp(NOW)}-${uuid(3)}.json.1.ab.tmp`);
     const fresh = join(dir, `${stamp(NOW)}-${uuid(4)}.summary.json`);
-    for (const file of [orphan, tmp, fresh]) await writeFile(file, "{}");
-    await utimes(orphan, old, old);
-    await utimes(tmp, old, old);
+    const picture = join(dir, `${stamp(NOW)}-${uuid(5)}.png`);
+    const kept = join(dir, `${stamp(NOW)}-${uuid(1)}.png`);
+    for (const file of [orphan, tmp, fresh, picture, kept])
+      await writeFile(file, "{}");
+    for (const file of [orphan, tmp, picture, kept])
+      await utimes(file, old, old);
 
     await cleanOrphans(root);
     const files = await readdir(dir);
-    expect(files).toHaveLength(3);
+    // the pair of report 1, its picture and the fresh half
+    expect(files).toHaveLength(4);
+    expect(files).toContain(`${stamp(NOW)}-${uuid(1)}.png`);
     expect(files).toContain(`${stamp(NOW)}-${uuid(4)}.summary.json`);
   });
 });

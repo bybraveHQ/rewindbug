@@ -95,6 +95,12 @@ export const Bug = z.object({
     ),
   report: ReportView,
   trimmed: z.array(z.enum(["console", "network", "steps", "test", "fields"])),
+  screenshot: z
+    .string()
+    .nullable()
+    .describe(
+      "Absolute path of a PNG of the screen at the moment of the error, also attached as an image; null when none was rendered",
+    ),
 });
 export type Bug = z.infer<typeof Bug>;
 
@@ -232,6 +238,7 @@ const project = (stored: Stored, limits: Limits): Bug => {
     path: summary.path,
     report: view as Bug["report"],
     trimmed: [...trimmed],
+    screenshot: null,
   };
 };
 

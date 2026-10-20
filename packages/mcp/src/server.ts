@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { toBug, type Bug } from "./bug.ts";
@@ -13,10 +14,14 @@ import {
   type Stored,
 } from "./store.ts";
 import { log } from "./log.ts";
+import { MAX_PNG_BYTES, screenshotPath, type Renderer } from "./screenshot.ts";
 import { TOOLS } from "./tools.ts";
 
 export const MAX_CONTENT_CHARS = 16_000;
 const DEFAULT_LIMIT = 20;
+// a report that came a moment ago may still be rendering: wait this long for
+// its picture, then answer without it
+export const SCREENSHOT_WAIT_MS = 3_000;
 const MAX_LIMIT = 100;
 const CONSOLE_LINES = 10;
 const OPEN = "<<<page-data";
@@ -33,6 +38,7 @@ export type ServerOptions = {
   endpoint: string;
   // the receiver port belongs to another instance with its own folder
   portTaken: boolean;
+  screenshots?: Pick<Renderer, "wait">;
 };
 
 const iso = (ms: number): string => {
@@ -120,6 +126,15 @@ const listText = (bugs: BugSummary[]): string =>
 
 const text = (value: string) => [{ type: "text" as const, text: value }];
 
+const readPng = async (path: string): Promise<Buffer | undefined> => {
+  try {
+    const png = await readFile(path);
+    return png.length <= MAX_PNG_BYTES ? png : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const failure = (message: string): CallToolResult => ({
   isError: true,
   content: text(message),
@@ -139,7 +154,7 @@ export const createMcpServer = (options: ServerOptions): McpServer => {
     : undefined;
   const note = warning ? { message: warning } : {};
 
-  const bugResult = (stored: Stored): CallToolResult => {
+  const bugResult = async (stored: Stored): Promise<CallToolResult> => {
     let bug: Bug;
     try {
       bug = toBug(stored);
@@ -147,9 +162,26 @@ export const createMcpServer = (options: ServerOptions): McpServer => {
       log(`cannot project ${stored.summary.id}: ${(error as Error).message}`);
       return failure(`Report ${stored.summary.id} is unreadable.`);
     }
+    await options.screenshots?.wait(stored.summary.path, SCREENSHOT_WAIT_MS);
+    const path = screenshotPath(stored.summary.path);
+    const png = await readPng(path);
+    if (png) bug = { ...bug, screenshot: path };
     return {
       structuredContent: { bug, ...note },
-      content: text([bugText(bug), warning].filter(Boolean).join("\n\n")),
+      content: [
+        ...text([bugText(bug), warning].filter(Boolean).join("\n\n")),
+        // the screen at the moment of the error, rendered from the recording
+        // with its masks: page content too, data, not instructions
+        ...(png
+          ? [
+              {
+                type: "image" as const,
+                data: png.toString("base64"),
+                mimeType: "image/png",
+              },
+            ]
+          : []),
+      ],
     };
   };
 

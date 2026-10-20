@@ -149,9 +149,20 @@
                     "type": "string",
                     "enum": ["console", "network", "steps", "test", "fields"]
                   }
+                },
+                "screenshot": {
+                  "description": "Absolute path of a PNG of the screen at the moment of the error, also attached as an image; null when none was rendered",
+                  "type": ["string", "null"]
                 }
               },
-              "required": ["id", "receivedAt", "path", "report", "trimmed"],
+              "required": [
+                "id",
+                "receivedAt",
+                "path",
+                "report",
+                "trimmed",
+                "screenshot"
+              ],
               "additionalProperties": false
             },
             { "type": "null" }
@@ -191,7 +202,11 @@
               "url": { "type": "string" },
               "fingerprint": { "type": "string" },
               "stepsCount": { "type": "number" },
-              "path": { "type": "string" }
+              "path": { "type": "string" },
+              "screenshot": {
+                "description": "A PNG of the screen at the moment of the error is stored next to the report",
+                "type": "boolean"
+              }
             },
             "required": [
               "id",
@@ -366,9 +381,20 @@
                     "type": "string",
                     "enum": ["console", "network", "steps", "test", "fields"]
                   }
+                },
+                "screenshot": {
+                  "description": "Absolute path of a PNG of the screen at the moment of the error, also attached as an image; null when none was rendered",
+                  "type": ["string", "null"]
                 }
               },
-              "required": ["id", "receivedAt", "path", "report", "trimmed"],
+              "required": [
+                "id",
+                "receivedAt",
+                "path",
+                "report",
+                "trimmed",
+                "screenshot"
+              ],
               "additionalProperties": false
             },
             { "type": "null" }

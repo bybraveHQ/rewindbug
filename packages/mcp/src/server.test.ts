@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -97,6 +97,69 @@ describe("tools", () => {
 
     const one = await call("get_bug", { id: fixture.id });
     expect(one.structuredContent?.bug).toEqual(bug);
+  });
+
+  test("a stored screenshot comes as an image; a report still rendering is waited for", async () => {
+    await post({
+      ...fixture,
+      replay: { format: "rrweb", events: [{ type: 4 }, { type: 2 }] },
+    });
+    const bare = await call("last_bug");
+    expect(bare.content.map((c) => c.type)).toEqual(["text"]);
+    expect(
+      (bare.structuredContent?.bug as { screenshot: unknown }).screenshot,
+    ).toBeNull();
+
+    const [summary] = (await call("list_bugs")).structuredContent?.bugs as {
+      path: string;
+      screenshot: boolean;
+    }[];
+    expect(summary?.screenshot).toBe(false);
+    // synthetic-image-ok: a format stub standing in for a rendered picture
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const pngPath = summary?.path.replace(/\.json$/, ".png") ?? "";
+    // the renderer writes the picture while the tool waits for it
+    const wait = vi.fn(async (path: string) => {
+      expect(path).toBe(summary?.path);
+      await writeFile(pngPath, png);
+    });
+    await client.close();
+    const server = createMcpServer({
+      dir: root,
+      endpoint,
+      portTaken: false,
+      screenshots: { wait },
+    });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    client = new Client({ name: "test", version: "0" });
+    await client.connect(clientSide);
+    await client.listTools();
+
+    const last = (await client.callTool({
+      name: "last_bug",
+      arguments: {},
+    })) as Result & {
+      content: { type: string; data?: string; mimeType?: string }[];
+    };
+    expect(wait).toHaveBeenCalledOnce();
+    expect(last.content.map((c) => c.type)).toEqual(["text", "image"]);
+    expect(last.content[1]).toMatchObject({
+      mimeType: "image/png",
+      data: png.toString("base64"),
+    });
+    expect(
+      (last.structuredContent?.bug as { screenshot: unknown }).screenshot,
+    ).toBe(pngPath);
+    expect(
+      (
+        (await call("list_bugs")).structuredContent?.bugs as {
+          screenshot: boolean;
+        }[]
+      )[0]?.screenshot,
+    ).toBe(true);
+    const one = await call("get_bug", { id: fixture.id });
+    expect(one.content.map((c) => c.type)).toEqual(["text", "image"]);
   });
 
   test("empty console and network say so instead of showing nothing", async () => {

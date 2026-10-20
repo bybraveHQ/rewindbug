@@ -158,7 +158,7 @@ if (endpoint) init({ endpoint });
 
 Add `.rewindbug/` to your app's `.gitignore`: it holds the token and the reports.
 
-From then on the same question gets the newest bug: the steps, the trigger, the console, the network and the test, without the recording.
+From then on the same question gets the newest bug: the steps, the trigger, the console, the network and the test, without the recording. With Playwright in the project the agent also gets a picture of the screen at the moment of the error, rendered from the recording: [A picture of the error](packages/mcp/README.md#a-picture-of-the-error).
 
 The agent's own browser can report too, with no change to the app: `npx rewindbug-mcp init-script --host <your stand>` writes a script for [Playwright MCP](https://github.com/microsoft/playwright-mcp) `--init-script`, and the stand's page errors land in the same folder. Chrome lets a public page reach `127.0.0.1` only with the Local Network Access permission: give Playwright MCP `--grant-permissions=local-network-access`, or the report is dropped with no error. The setup is in [the server's README](packages/mcp/README.md#the-agents-browser).
 

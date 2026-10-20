@@ -8,7 +8,12 @@ import {
 import { join, resolve } from "node:path";
 import { createGunzip } from "node:zlib";
 import { log } from "./log.ts";
-import { saveReport, validateReport } from "./store.ts";
+import {
+  saveReport,
+  validateReport,
+  type BugSummary,
+  type ReadReport,
+} from "./store.ts";
 
 export const DEFAULT_PORT = 7357;
 export const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024;
@@ -124,6 +129,8 @@ export const startReceiver = async (options: {
   port: number;
   dir: string;
   token: string;
+  // after a report is stored, before the page gets its answer: must not block
+  onSaved?: (summary: BugSummary, report: ReadReport) => void;
 }): Promise<Receiver> => {
   const expected = digest(`/${options.token}`);
   let hosts = new Set<string>();
@@ -137,11 +144,17 @@ export const startReceiver = async (options: {
     const receivedAt = Date.now();
     const report = validateReport(parseJson(text), receivedAt);
     if (typeof report === "string") throw new HttpError(400);
+    let summary: BugSummary;
     try {
-      await saveReport(options.dir, report, text, receivedAt);
+      summary = await saveReport(options.dir, report, text, receivedAt);
     } catch (error) {
       log(`cannot save a report: ${(error as Error).message}`);
       return 500;
+    }
+    try {
+      options.onSaved?.(summary, report);
+    } catch (error) {
+      log(`after saving a report: ${(error as Error).message}`);
     }
     return 204;
   };

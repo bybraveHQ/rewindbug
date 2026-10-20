@@ -24,6 +24,7 @@ export const UUID = new RegExp(`^${UUID_SOURCE}$`);
 const BASE = new RegExp(`^(\\d{8}T\\d{9}Z)-(${UUID_SOURCE})$`);
 const SUMMARY_EXT = ".summary.json";
 const REPORT_EXT = ".json";
+const SCREENSHOT_EXT = ".png";
 const TMP_EXT = ".tmp";
 
 // what the server reads from a report; newer SDK revisions add fields and
@@ -60,6 +61,12 @@ export const BugSummary = z.looseObject({
   fingerprint: z.string(),
   stepsCount: z.number(),
   path: z.string(),
+  screenshot: z
+    .boolean()
+    .optional()
+    .describe(
+      "A PNG of the screen at the moment of the error is stored next to the report",
+    ),
 });
 export type BugSummary = z.infer<typeof BugSummary>;
 
@@ -121,6 +128,7 @@ const listDir = async (root: string): Promise<string[]> => {
 type Listing = {
   summaries: Map<string, Name>;
   reports: Set<string>;
+  screenshots: Set<string>;
   others: string[];
 };
 
@@ -128,6 +136,7 @@ const scan = async (root: string): Promise<Listing> => {
   const listing: Listing = {
     summaries: new Map(),
     reports: new Set(),
+    screenshots: new Set(),
     others: [],
   };
   for (const file of await listDir(root)) {
@@ -138,6 +147,10 @@ const scan = async (root: string): Promise<Listing> => {
     } else if (file.endsWith(REPORT_EXT)) {
       const name = parseBase(file.slice(0, -REPORT_EXT.length));
       if (name) listing.reports.add(name.base);
+      else listing.others.push(file);
+    } else if (file.endsWith(SCREENSHOT_EXT)) {
+      const name = parseBase(file.slice(0, -SCREENSHOT_EXT.length));
+      if (name) listing.screenshots.add(name.base);
       else listing.others.push(file);
     } else {
       listing.others.push(file);
@@ -185,15 +198,19 @@ const writeAtomic = async (target: string, text: string): Promise<string> => {
   return tmp;
 };
 
+// a report's files: the screenshot goes with the pair
+const removeReport = async (dir: string, base: string): Promise<void> => {
+  await removeFile(join(dir, base + SUMMARY_EXT));
+  await removeFile(join(dir, base + REPORT_EXT));
+  await removeFile(join(dir, base + SCREENSHOT_EXT));
+};
+
 const prune = async (root: string): Promise<void> => {
   const { summaries, reports } = await scan(root);
   const bases = [...new Set([...summaries.keys(), ...reports])].sort();
   const excess = bases.slice(0, Math.max(0, bases.length - MAX_REPORTS));
   const dir = reportsDir(root);
-  for (const base of excess) {
-    await removeFile(join(dir, base + SUMMARY_EXT));
-    await removeFile(join(dir, base + REPORT_EXT));
-  }
+  for (const base of excess) await removeReport(dir, base);
 };
 
 const save = async (
@@ -222,10 +239,8 @@ const save = async (
   // the older copy goes only after the new one is in place
   const { summaries, reports } = await scan(root);
   for (const old of new Set([...summaries.keys(), ...reports])) {
-    if (old !== base && parseBase(old)?.id === report.id) {
-      await removeFile(join(dir, old + SUMMARY_EXT));
-      await removeFile(join(dir, old + REPORT_EXT));
-    }
+    if (old !== base && parseBase(old)?.id === report.id)
+      await removeReport(dir, old);
   }
   await prune(root);
   return summary;
@@ -254,7 +269,7 @@ export const listSummaries = async (
   root: string,
   limit = MAX_REPORTS,
 ): Promise<BugSummary[]> => {
-  const { summaries, reports } = await scan(root);
+  const { summaries, reports, screenshots } = await scan(root);
   const dir = reportsDir(root);
   const byId = new Map<string, BugSummary>();
   for (const name of summaries.values()) {
@@ -278,6 +293,7 @@ export const listSummaries = async (
       id: name.id,
       receivedAt: name.receivedAt,
       path: join(dir, name.base + REPORT_EXT),
+      screenshot: screenshots.has(name.base),
     };
     const known = byId.get(summary.id);
     if (!known || known.receivedAt < summary.receivedAt)
@@ -323,14 +339,18 @@ export const lastReadable = async (
   return undefined;
 };
 
-// leftovers of a crash: temp files and halves of a pair older than an hour
+// leftovers of a crash: temp files, halves of a pair and screenshots without
+// a report, older than an hour
 export const cleanOrphans = async (
   root: string,
   now = Date.now(),
 ): Promise<void> => {
   const dir = reportsDir(root);
-  const { summaries, reports, others } = await scan(root);
+  const { summaries, reports, screenshots, others } = await scan(root);
   const candidates = [
+    ...[...screenshots]
+      .filter((base) => !reports.has(base))
+      .map((base) => base + SCREENSHOT_EXT),
     ...others.filter((file) => file.endsWith(TMP_EXT)),
     ...[...summaries.keys()]
       .filter((base) => !reports.has(base))

@@ -106,6 +106,18 @@ A bug has no rrweb events: `report.replay.events` is only their count. The full 
 
 Everything in a report comes from a web page. The agent gets it marked as data, not instructions. Read `report.test` before running it.
 
+### A picture of the error
+
+With [Playwright](https://playwright.dev) in the project, each report also gets a PNG of the screen at the moment of the error: the server plays the recording back to the trigger in a headless Chromium and saves `<received>-<id>.png` next to the report. `last_bug` and `get_bug` attach it as an image the agent can look at, with its path in `bug.screenshot`; `list_bugs` says `screenshot: true`.
+
+```bash
+npm i -D playwright && npx playwright install chromium
+```
+
+The page gets its `204` first, the picture follows in the background, one report at a time, in about a second. A tool call about a report that came a moment ago waits up to 3 seconds for it. Without Playwright or its Chromium the server logs one line and reports come without a picture.
+
+The picture holds what the recording holds, with the same masks. To draw the page, the server itself fetches the page's styles, fonts and images by `GET`, without cookies, from the address it checked, and follows no redirect; the browser itself is cut off from the network, so even preconnect hints in the page go nowhere; it never runs the page's scripts and sends no data requests. No private or loopback address is reached, except the stand's own origin when the stand runs on this machine, such as `http://localhost:4244`. Each request has 5 seconds, six run at a time, one picture asks for at most 100 resources and 20 MiB. Chromium runs with its sandbox on. A stand behind a login or deployment protection answers those requests with `401`: the picture then has the layout and text without the stand's styles. A report file over 8 MiB is not drawn; one picture takes at most 10 seconds.
+
 ## Settings
 
 | Variable         | Default                            | Meaning                                                 |
@@ -122,6 +134,7 @@ The folder keeps the last 100 reports. Clean it by hand whenever you like.
 - **Console noise on tab close.** A report sent with `sendBeacon` on tab close is delivered. The browser still logs that the `*` CORS answer was rejected for a request with credentials.
 - **Local Network Access.** Chrome asks before a public or `https://` page reaches `127.0.0.1`; an automated browser has no one to ask and drops the request. Grant `local-network-access`: Playwright `permissions: ["local-network-access"]`, Playwright MCP `--grant-permissions=local-network-access`. Safari may block it as mixed content.
 - **Custom request headers.** The receiver accepts only `content-type` in CORS. A header added to every request, such as a deployment protection bypass in Playwright `extraHTTPHeaders`, also goes with the report and the preflight fails. Scope the header to your stand with `context.route` or trade it for the stand's cookie once.
+- **Pictures of protected stands.** The renderer loads a stand's styles without its cookies, so a stand behind a login draws without them. A recording has no pixels of a `<canvas>` or a `<video>`.
 - **Containers.** Port forwarding from a devcontainer or WSL changes the `Host` header and the server answers `421`. Run the server in the same environment as the browser.
 - **Token in the agent's context.** `last_bug` returns the endpoint with the token while the folder is empty. A crafted report could make the agent repeat it. The token only guards writes to a folder on your machine: delete `.rewindbug/token` and restart to rotate it.
 

@@ -9,6 +9,7 @@ import {
   startReceiver,
 } from "./receiver.ts";
 import { parseInitScriptArgs, writeInitScript } from "./init-script.ts";
+import { createRenderer } from "./screenshot.ts";
 import { createMcpServer } from "./server.ts";
 import { cleanOrphans, ensureDirs } from "./store.ts";
 
@@ -50,7 +51,15 @@ const main = async (): Promise<void> => {
   await ensureDirs(dir);
   await cleanOrphans(dir);
   const token = await readOrCreateToken(dir);
-  const receiver = await startReceiver({ port, dir, token });
+  // the receiver listens on loopback and its reports come from the
+  // developer's own browser: a local stand may draw its own styles
+  const renderer = createRenderer({ dir, privateStand: true });
+  const receiver = await startReceiver({
+    port,
+    dir,
+    token,
+    onSaved: (summary) => renderer.enqueue(summary.path),
+  });
   const endpoint = endpointOf(receiver.port ?? port, token);
   if (receiver.port !== null) log(`receiving reports at ${endpoint}`);
   log(`reports folder ${dir}`);
@@ -59,6 +68,7 @@ const main = async (): Promise<void> => {
     dir,
     endpoint,
     portTaken: receiver.port === null,
+    screenshots: renderer,
   });
   let closing = false;
   // the client may go away without a protocol close: an open port must not
@@ -67,6 +77,7 @@ const main = async (): Promise<void> => {
     if (closing) return;
     closing = true;
     await receiver.close();
+    await renderer.close();
     await server.close().catch(() => undefined);
     process.exit(0);
   };
