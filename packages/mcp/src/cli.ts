@@ -8,6 +8,7 @@ import {
   readOrCreateToken,
   startReceiver,
 } from "./receiver.ts";
+import { parseInitScriptArgs, writeInitScript } from "./init-script.ts";
 import { createMcpServer } from "./server.ts";
 import { cleanOrphans, ensureDirs } from "./store.ts";
 
@@ -22,7 +23,28 @@ const portOf = (raw: string | undefined): number => {
   return port;
 };
 
+// `rewindbug-mcp init-script --host …`: the file for the agent's browser,
+// on the token and port this server will use; then exit
+const initScript = async (argv: string[]): Promise<void> => {
+  const dir = resolve(process.env.REWINDBUG_DIR || ".rewindbug");
+  const port = portOf(process.env.REWINDBUG_PORT);
+  // a random port changes on every start: the file would point nowhere
+  if (port === 0)
+    throw new Error("REWINDBUG_PORT=0 cannot be baked into an init-script");
+  const { path, hosts } = await writeInitScript(parseInitScriptArgs(argv), {
+    dir,
+    port,
+  });
+  // stdout is free here: no MCP session in this mode. Hosts are counted,
+  // not listed
+  console.log(
+    `rewindbug-mcp: init-script for ${hosts} host(s), port ${port}: ${path}`,
+  );
+};
+
 const main = async (): Promise<void> => {
+  if (process.argv[2] === "init-script")
+    return initScript(process.argv.slice(3));
   const dir = resolve(process.env.REWINDBUG_DIR || ".rewindbug");
   const port = portOf(process.env.REWINDBUG_PORT);
   await ensureDirs(dir);
