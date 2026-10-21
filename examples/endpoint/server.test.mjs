@@ -663,3 +663,49 @@ test("without the renderer module: one log line, issues without a picture", asyn
   assert.doesNotMatch(hub.calls[0].body.body, /!\[Screen/);
   assert.match(logs(), /screenshots off: install rewindbug-mcp and playwright/);
 });
+
+test("a started beacon is counted per host in coverage.json", async () => {
+  const { dir, url } = await start();
+  const beacon = (body) => post(`${url}/started`, JSON.stringify(body));
+  const signal = { host: "stand.example.dev", path: "/login", sdk: "0.6.0" };
+  assert.equal((await beacon(signal)).status, 204);
+  assert.equal((await beacon({ ...signal, path: "/orders/1" })).status, 204);
+  assert.equal((await beacon({ ...signal, host: "localhost" })).status, 204);
+  const file = join(dir, "coverage.json");
+  await waitFor(() => existsSync(file));
+  await waitFor(
+    () => JSON.parse(readFileSync(file, "utf8")).hosts.localhost?.pages === 1,
+  );
+  const coverage = JSON.parse(readFileSync(file, "utf8"));
+  assert.equal(typeof coverage.since, "number");
+  assert.equal(coverage.hosts["stand.example.dev"].pages, 2);
+  assert.equal(coverage.hosts["stand.example.dev"].lastPath, "/orders/1");
+  assert.equal(coverage.hosts["stand.example.dev"].sdk, "0.6.0");
+  assert.deepEqual(await readdir(join(dir, "reports")), []);
+});
+
+test("a bad started beacon is refused and writes nothing", async () => {
+  const { dir, url } = await start();
+  const signal = { host: "stand.example.dev", path: "/" };
+  for (const body of [
+    "not json",
+    JSON.stringify({ ...signal, host: "user:pw@stand.example.dev" }),
+    JSON.stringify({ ...signal, path: "/a b" }),
+    JSON.stringify({ ...signal, sdk: "x".repeat(33) }),
+  ])
+    assert.equal((await post(`${url}/started`, body)).status, 400);
+  const big = JSON.stringify({ ...signal, path: `/${"a".repeat(5000)}` });
+  assert.equal((await post(`${url}/started`, big)).status, 413);
+  await wait(1200);
+  assert.equal(existsSync(join(dir, "coverage.json")), false);
+});
+
+test("on loopback a page from another site cannot post a started beacon", async () => {
+  const { url } = await start();
+  const response = await fetch(`${url}/started`, {
+    method: "POST",
+    headers: { origin: "https://evil.example" },
+    body: JSON.stringify({ host: "evil.example", path: "/" }),
+  });
+  assert.equal(response.status, 403);
+});

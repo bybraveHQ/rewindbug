@@ -21,6 +21,7 @@ import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { pathToFileURL, URLSearchParams } from "node:url";
 import { createGunzip } from "node:zlib";
+import { clearTimeout, setTimeout } from "node:timers";
 
 const DEFAULT_PORT = 7358;
 const PORT = Number(process.env.PORT ?? DEFAULT_PORT);
@@ -77,6 +78,17 @@ const TOKEN_CHARS = /^[A-Za-z0-9._~-]+$/;
 
 const REPORTS = join(DIR, "reports");
 const PATH = TOKEN ? `/report/${TOKEN}` : "/report";
+// "rewindbug started on this page": one beacon per page load, counted per
+// host in coverage.json next to reports/; counters, so no rotation
+const STARTED_PATH = `${PATH}/started`;
+const COVERAGE = join(DIR, "coverage.json");
+const MAX_STARTED_BYTES = 4 * 1024;
+const MAX_COVERAGE_HOSTS = 50;
+const COVERAGE_FLUSH_MS = 1000;
+const HOSTNAME =
+  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+const PAGE_PATH = /^\/[\x21-\x7e]{0,2047}$/;
+const SDK_VERSION = /^[\w.+-]{1,32}$/;
 const VIEW_PATH = "/view";
 const VIEW_TOKEN_FILE = join(DIR, "view-token");
 const VIEW_TOKEN_BYTES = 32;
@@ -102,6 +114,7 @@ class HttpError extends Error {
 const log = (text) => process.stderr.write(`rewindbug-endpoint: ${text}\n`);
 const digest = (value) => createHash("sha256").update(value).digest();
 const expected = digest(PATH);
+const expectedStarted = digest(STARTED_PATH);
 // set at start: REWINDBUG_VIEW_TOKEN, else one kept in the folder on
 // loopback; empty beyond loopback without the variable, reading is then off
 let viewToken = "";
@@ -271,14 +284,14 @@ const inflate = (raw) =>
 
 // an oversized body is still read to the end: closing the socket mid-upload
 // makes the browser see a reset instead of 413
-const readBody = (request) =>
+const readRaw = (request, max) =>
   new Promise((done, fail) => {
     const chunks = [];
     let size = 0;
-    let over = Number(request.headers["content-length"]) > MAX_COMPRESSED_BYTES;
+    let over = Number(request.headers["content-length"]) > max;
     request.on("data", (chunk) => {
       size += chunk.length;
-      if (size > MAX_COMPRESSED_BYTES) over = true;
+      if (size > max) over = true;
       if (!over) chunks.push(chunk);
     });
     request.on("error", () => fail(new HttpError(400)));
@@ -288,10 +301,15 @@ const readBody = (request) =>
       if (over) return fail(new HttpError(413));
       const raw = Buffer.concat(chunks);
       if (raw.length === 0) return fail(new HttpError(400));
-      const gzip = raw[0] === GZIP_MAGIC[0] && raw[1] === GZIP_MAGIC[1];
-      done(gzip ? inflate(raw) : raw);
+      done(raw);
     });
   });
+
+const readBody = async (request) => {
+  const raw = await readRaw(request, MAX_COMPRESSED_BYTES);
+  const gzip = raw[0] === GZIP_MAGIC[0] && raw[1] === GZIP_MAGIC[1];
+  return gzip ? inflate(raw) : raw;
+};
 
 const receive = async (request) => {
   const text = (await readBody(request)).toString("utf8");
@@ -315,6 +333,103 @@ const receive = async (request) => {
   }
   // report text is quoted: a newline or an escape code cannot forge a log line
   log(`saved ${report.id}: ${JSON.stringify(report.trigger.kind)}`);
+  return 204;
+};
+
+// signals wait here up to a second; the file is read again on each write,
+// so deleting it starts the count again
+let coveragePending = new Map();
+let coverageTimer = null;
+let coverageChain = Promise.resolve();
+let coverageWarned = false;
+
+const readCoverageFile = async () => {
+  try {
+    const file = JSON.parse(await readFile(COVERAGE, "utf8"));
+    return isObject(file) &&
+      typeof file.since === "number" &&
+      isObject(file.hosts)
+      ? file
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCoverage = async () => {
+  if (!coveragePending.size) return;
+  const batch = coveragePending;
+  coveragePending = new Map();
+  // a new file counts from its first signal, not from the write
+  const first = Math.min(...[...batch.values()].map((item) => item.firstAt));
+  const file = (await readCoverageFile()) ?? { since: first, hosts: {} };
+  for (const [host, delta] of batch) {
+    const known = isObject(file.hosts[host]) ? file.hosts[host] : null;
+    if (!known && Object.keys(file.hosts).length >= MAX_COVERAGE_HOSTS) {
+      if (!coverageWarned)
+        log(`coverage keeps ${MAX_COVERAGE_HOSTS} hosts, more are dropped`);
+      coverageWarned = true;
+      continue;
+    }
+    const sdk = delta.sdk ?? known?.sdk;
+    file.hosts[host] = {
+      pages: (Number(known?.pages) || 0) + delta.pages,
+      lastAt: Math.max(Number(known?.lastAt) || 0, delta.lastAt),
+      lastPath: delta.lastPath,
+      ...(sdk && { sdk }),
+    };
+  }
+  const tmp = `${COVERAGE}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    await writeFile(tmp, JSON.stringify(file, null, 2), { mode: 0o600 });
+    await rename(tmp, COVERAGE);
+  } catch (error) {
+    await removeFile(tmp).catch(() => undefined);
+    log(`cannot write ${COVERAGE}: ${error.message}`);
+  }
+};
+
+const flushCoverage = () => {
+  clearTimeout(coverageTimer);
+  coverageTimer = null;
+  coverageChain = coverageChain.then(writeCoverage, writeCoverage);
+  return coverageChain;
+};
+
+// a plain-text beacon, never gzip: anything off the shape is 400 and
+// nothing is written
+const started = async (request) => {
+  let signal;
+  try {
+    signal = JSON.parse(
+      (await readRaw(request, MAX_STARTED_BYTES)).toString("utf8"),
+    );
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(400);
+  }
+  if (
+    !isObject(signal) ||
+    typeof signal.host !== "string" ||
+    signal.host.length > 253 ||
+    !HOSTNAME.test(signal.host) ||
+    typeof signal.path !== "string" ||
+    !PAGE_PATH.test(signal.path) ||
+    (signal.sdk !== undefined &&
+      (typeof signal.sdk !== "string" || !SDK_VERSION.test(signal.sdk)))
+  )
+    throw new HttpError(400);
+  const known = coveragePending.get(signal.host);
+  const sdk = signal.sdk ?? known?.sdk;
+  const now = Date.now();
+  coveragePending.set(signal.host, {
+    firstAt: known?.firstAt ?? now,
+    pages: (known?.pages ?? 0) + 1,
+    lastAt: now,
+    lastPath: signal.path,
+    ...(sdk && { sdk }),
+  });
+  coverageTimer ??= setTimeout(() => void flushCoverage(), COVERAGE_FLUSH_MS);
   return 204;
 };
 
@@ -717,7 +832,9 @@ const server = createServer(
       const viewing = url === VIEW_PATH || /^\/view[/?]/.test(url);
       if (viewing && request.method === "GET" && viewToken)
         return await view(request, response, url.slice(VIEW_PATH.length));
-      if (!timingSafeEqual(digest(url), expected)) {
+      const hashed = digest(url);
+      const isStarted = timingSafeEqual(hashed, expectedStarted);
+      if (!isStarted && !timingSafeEqual(hashed, expected)) {
         response.writeHead(404).end();
         return;
       }
@@ -733,6 +850,11 @@ const server = createServer(
         return respond(response, 403);
       if (request.method === "OPTIONS") return respond(response, 204);
       if (request.method !== "POST") return respond(response, 405);
+      // a few hundred bytes: no slot, only the idle timeout
+      if (isStarted) {
+        request.setTimeout(BODY_IDLE_MS, () => request.destroy());
+        return respond(response, await started(request));
+      }
       // the SDK keeps a refused report queued and sends it again later
       if (active >= MAX_CONCURRENT) {
         response.setHeader("connection", "close");
@@ -883,6 +1005,7 @@ const shutdown = () => {
   if (githubPending > 0)
     log(`stopping with ${githubPending} reports not yet sent to GitHub`);
   server.close(async () => {
+    await flushCoverage();
     await renderer?.close();
     process.exit(0);
   });
