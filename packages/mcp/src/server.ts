@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -15,7 +14,15 @@ import {
 } from "./store.ts";
 import { log } from "./log.ts";
 import { MAX_PNG_BYTES, screenshotPath, type Renderer } from "./screenshot.ts";
+import { readCoverage } from "./coverage.ts";
+import {
+  collectStatus,
+  coverageLine,
+  probeReceiver,
+  statusText,
+} from "./status.ts";
 import { TOOLS } from "./tools.ts";
+import { VERSION } from "./version.ts";
 
 export const MAX_CONTENT_CHARS = 16_000;
 const DEFAULT_LIMIT = 20;
@@ -26,16 +33,13 @@ const MAX_LIMIT = 100;
 const CONSOLE_LINES = 10;
 const OPEN = "<<<page-data";
 const CLOSE = ">>>page-data";
-// next to src/ in the repo and to dist/ in the published package
-const VERSION = (
-  JSON.parse(
-    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-  ) as { version: string }
-).version;
 
 export type ServerOptions = {
   dir: string;
   endpoint: string;
+  // the configured port and the folder's token, for the status tool
+  port: number;
+  token: string;
   // the receiver port belongs to another instance with its own folder
   portTaken: boolean;
   screenshots?: Pick<Renderer, "wait">;
@@ -198,6 +202,8 @@ export const createMcpServer = (options: ServerOptions): McpServer => {
       if (stored) return bugResult(stored);
       const message = [
         `No bug reports yet in ${reportsDir(dir)}.`,
+        coverageLine(await readCoverage(dir)),
+        "The status tool shows the port, the init-script and the coverage.",
         warning ??
           `Point the app at this server: init({ endpoint: "${options.endpoint}" }).`,
       ]
@@ -241,6 +247,30 @@ export const createMcpServer = (options: ServerOptions): McpServer => {
       if (result.status === "invalid")
         return failure(`Report ${id} is unreadable.`);
       return bugResult(result.stored);
+    },
+  );
+
+  server.registerTool(
+    "status",
+    {
+      description: TOOLS.status.description,
+      outputSchema: TOOLS.status.output,
+    },
+    async () => {
+      const status = await collectStatus({
+        dir,
+        port: options.port,
+        token: options.token,
+        // a second session of this project shares the folder and token:
+        // its receiver answers as our own, a stranger does not
+        receiver: options.portTaken
+          ? await probeReceiver(options.port, options.token)
+          : "own",
+      });
+      return {
+        structuredContent: { status },
+        content: text(statusText(status)),
+      };
     },
   );
 

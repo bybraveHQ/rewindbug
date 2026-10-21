@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { log } from "./log.ts";
 import {
@@ -11,9 +12,12 @@ import {
 import { parseInitScriptArgs, writeInitScript } from "./init-script.ts";
 import { createRenderer } from "./screenshot.ts";
 import { createMcpServer } from "./server.ts";
+import { collectStatus, statusText } from "./status.ts";
+import { createCoverage } from "./coverage.ts";
 import { cleanOrphans, ensureDirs } from "./store.ts";
 
 const MAX_PORT = 65_535;
+const BAKED_PORT = /endpoint: "http:\/\/127\.0\.0\.1:(\d{1,5})\//;
 
 const portOf = (raw: string | undefined): number => {
   if (raw === undefined || raw === "") return DEFAULT_PORT;
@@ -43,9 +47,33 @@ const initScript = async (argv: string[]): Promise<void> => {
   );
 };
 
+// `rewindbug-mcp status`: the same answer as the status tool, as text,
+// without an MCP session; the port is asked, not taken
+const status = async (): Promise<void> => {
+  const dir = resolve(process.env.REWINDBUG_DIR || ".rewindbug");
+  // the token file is read, never created: status changes nothing
+  const token = await readFile(join(dir, "token"), "utf8")
+    .then((value) => value.trim())
+    .catch(() => "");
+  // a project's port lives in its MCP config; without REWINDBUG_PORT the
+  // init-script, built for that port, knows it
+  const env = process.env.REWINDBUG_PORT;
+  const baked = env
+    ? undefined
+    : await readFile(join(dir, "init-script.js"), "utf8")
+        .then((text) => BAKED_PORT.exec(text)?.[1])
+        .catch(() => undefined);
+  const port = portOf(env || baked);
+  const portSource = env ? "env" : baked ? "init-script" : "default";
+  console.log(
+    statusText(await collectStatus({ dir, port, portSource, token })),
+  );
+};
+
 const main = async (): Promise<void> => {
   if (process.argv[2] === "init-script")
     return initScript(process.argv.slice(3));
+  if (process.argv[2] === "status") return status();
   const dir = resolve(process.env.REWINDBUG_DIR || ".rewindbug");
   const port = portOf(process.env.REWINDBUG_PORT);
   await ensureDirs(dir);
@@ -54,10 +82,12 @@ const main = async (): Promise<void> => {
   // the receiver listens on loopback and its reports come from the
   // developer's own browser: a local stand may draw its own styles
   const renderer = createRenderer({ dir, privateStand: true });
+  const coverage = createCoverage(dir);
   const receiver = await startReceiver({
     port,
     dir,
     token,
+    coverage,
     onSaved: (summary) => renderer.enqueue(summary.path),
   });
   const endpoint = endpointOf(receiver.port ?? port, token);
@@ -67,6 +97,8 @@ const main = async (): Promise<void> => {
   const server = createMcpServer({
     dir,
     endpoint,
+    port: receiver.port ?? port,
+    token,
     portTaken: receiver.port === null,
     screenshots: renderer,
   });
@@ -77,6 +109,7 @@ const main = async (): Promise<void> => {
     if (closing) return;
     closing = true;
     await receiver.close();
+    await coverage.close();
     await renderer.close();
     await server.close().catch(() => undefined);
     process.exit(0);

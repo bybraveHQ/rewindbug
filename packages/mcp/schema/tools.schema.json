@@ -405,5 +405,97 @@
       "required": ["bug"],
       "additionalProperties": false
     }
+  },
+  "status": {
+    "input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {}
+    },
+    "output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "object",
+          "properties": {
+            "version": { "type": "string" },
+            "folder": { "type": "string" },
+            "reports": { "type": "number" },
+            "lastReportAt": { "type": "number" },
+            "port": { "type": "number" },
+            "receiver": {
+              "type": "string",
+              "enum": ["own", "taken", "down"],
+              "description": "own: this folder's receiver listens on the port; taken: another process holds it; down: nothing listens, the MCP server is not running"
+            },
+            "portSource": {
+              "type": "string",
+              "enum": ["env", "init-script", "default"],
+              "description": "Where the port came from: REWINDBUG_PORT, the init-script's endpoint, or 7357"
+            },
+            "initScript": {
+              "type": "object",
+              "properties": {
+                "path": { "type": "string" },
+                "exists": { "type": "boolean" },
+                "build": { "type": "string" },
+                "installed": { "type": "string" },
+                "hosts": { "type": "array", "items": { "type": "string" } },
+                "endpointMatches": { "type": "boolean" }
+              },
+              "required": ["path", "exists"],
+              "additionalProperties": false
+            },
+            "coverage": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "since": { "type": "number" },
+                    "hosts": {
+                      "type": "object",
+                      "propertyNames": { "type": "string" },
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "pages": { "type": "number" },
+                          "lastAt": { "type": "number" },
+                          "lastPath": { "type": "string" },
+                          "sdk": { "type": "string" }
+                        },
+                        "required": ["pages", "lastAt", "lastPath"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["since", "hosts"],
+                  "additionalProperties": false
+                },
+                { "type": "null" }
+              ]
+            },
+            "screenshots": {
+              "description": "The Playwright package the renderer loads, null without one",
+              "type": ["string", "null"]
+            }
+          },
+          "required": [
+            "version",
+            "folder",
+            "reports",
+            "port",
+            "receiver",
+            "portSource",
+            "initScript",
+            "coverage",
+            "screenshots"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": ["status"],
+      "additionalProperties": false
+    }
   }
 }

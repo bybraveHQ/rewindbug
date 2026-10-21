@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { fixture } from "./fixture.ts";
+import { createCoverage, readCoverage, type Coverage } from "./coverage.ts";
 import {
   endpointOf,
   MAX_BODY_BYTES,
@@ -26,6 +27,7 @@ let root: string;
 let token: string;
 let receiver: Receiver;
 let port: number;
+let coverage: Coverage;
 
 type Reply = { status: number; headers: Record<string, unknown> };
 
@@ -62,12 +64,14 @@ beforeEach(async () => {
   await ensureDirs(root);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
   token = await readOrCreateToken(root);
-  receiver = await startReceiver({ port: 0, dir: root, token });
+  coverage = createCoverage(root);
+  receiver = await startReceiver({ port: 0, dir: root, token, coverage });
   port = receiver.port ?? 0;
 });
 
 afterEach(async () => {
   await receiver.close();
+  await coverage.close();
   vi.restoreAllMocks();
   await rm(root, { recursive: true, force: true });
 });
@@ -197,5 +201,64 @@ describe("receiver", () => {
     const second = await startReceiver({ port, dir: root, token });
     expect(second.port).toBeNull();
     await second.close();
+  });
+});
+
+describe("started signal", () => {
+  const signal = (patch: object = {}) =>
+    JSON.stringify({
+      host: "stand.example.dev",
+      path: "/login",
+      sdk: "0.6.0",
+      ...patch,
+    });
+
+  test("counts pages per host in coverage.json", async () => {
+    const path = `/${token}/started`;
+    expect((await send({ path, body: signal() })).status).toBe(204);
+    expect(
+      (await send({ path, body: signal({ path: "/orders/1" }) })).status,
+    ).toBe(204);
+    expect(
+      (await send({ path, body: signal({ host: "localhost" }) })).status,
+    ).toBe(204);
+    await coverage.flush();
+    const file = await readCoverage(root);
+    expect(file?.hosts["stand.example.dev"]).toMatchObject({
+      pages: 2,
+      lastPath: "/orders/1",
+      sdk: "0.6.0",
+    });
+    expect(file?.hosts.localhost?.pages).toBe(1);
+    expect((await stat(join(root, "coverage.json"))).mode & 0o777).toBe(0o600);
+    expect(await listSummaries(root)).toEqual([]);
+  });
+
+  test("answers the preflight and rejects a bad signal with 400", async () => {
+    const path = `/${token}/started`;
+    expect((await send({ path, method: "OPTIONS" })).status).toBe(204);
+    for (const body of [
+      "not json",
+      signal({ host: "user:pw@stand.example.dev" }),
+      signal({ path: "/a b" }),
+      signal({ path: "login" }),
+      signal({ sdk: "x".repeat(33) }),
+    ])
+      expect((await send({ path, body })).status).toBe(400);
+    expect(
+      (await send({ path, body: signal({ path: `/${"a".repeat(4096)}` }) }))
+        .status,
+    ).toBe(413);
+    await coverage.flush();
+    expect(await readCoverage(root)).toBeUndefined();
+  });
+
+  test("a receiver without coverage answers 404 on the started path", async () => {
+    await receiver.close();
+    receiver = await startReceiver({ port: 0, dir: root, token });
+    port = receiver.port ?? 0;
+    expect(
+      (await send({ path: `/${token}/started`, body: signal() })).status,
+    ).toBe(404);
   });
 });

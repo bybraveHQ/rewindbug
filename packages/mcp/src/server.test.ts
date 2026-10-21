@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:http";
 import { gzipSync } from "node:zlib";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -20,9 +21,17 @@ let root: string;
 let receiver: Receiver;
 let endpoint: string;
 let client: Client;
+let token: string;
+let port: number;
 
 const connect = async (portTaken = false) => {
-  const server = createMcpServer({ dir: root, endpoint, portTaken });
+  const server = createMcpServer({
+    dir: root,
+    endpoint,
+    port,
+    token,
+    portTaken,
+  });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await server.connect(serverSide);
   const next = new Client({ name: "test", version: "0" });
@@ -53,9 +62,10 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "rewindbug-server-"));
   await ensureDirs(root);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
-  const token = await readOrCreateToken(root);
+  token = await readOrCreateToken(root);
   receiver = await startReceiver({ port: 0, dir: root, token });
-  endpoint = endpointOf(receiver.port ?? 0, token);
+  port = receiver.port ?? 0;
+  endpoint = endpointOf(port, token);
   client = await connect();
 });
 
@@ -127,6 +137,8 @@ describe("tools", () => {
     const server = createMcpServer({
       dir: root,
       endpoint,
+      port,
+      token,
       portTaken: false,
       screenshots: { wait },
     });
@@ -261,5 +273,94 @@ describe("schema", () => {
         expect.objectContaining(input),
       );
     }
+  });
+});
+
+describe("coverage and status", () => {
+  const coverage = {
+    since: Date.parse("2026-10-21T10:00:00Z"),
+    hosts: {
+      "stand.example.dev": {
+        pages: 12,
+        lastAt: Date.parse("2026-10-21T14:02:00Z"),
+        lastPath: "/login",
+        sdk: "0.6.0",
+      },
+    },
+  };
+
+  test("last_bug on an empty folder says nothing started yet", async () => {
+    const message = String((await call("last_bug")).structuredContent?.message);
+    expect(message).toContain("has not started on any page yet");
+    expect(message).toContain(endpoint);
+  });
+
+  test("last_bug on an empty folder counts the covered pages", async () => {
+    await writeFile(join(root, "coverage.json"), JSON.stringify(coverage));
+    const message = String((await call("last_bug")).structuredContent?.message);
+    expect(message).toContain(
+      "rewindbug started on 12 page(s) of 1 host(s) since 2026-10-21T10:00:00.000Z, last at 2026-10-21T14:02:00.000Z, sdk 0.6.0",
+    );
+  });
+
+  test("status reports the folder, the receiver and the coverage", async () => {
+    await writeFile(join(root, "coverage.json"), JSON.stringify(coverage));
+    await post(fixture);
+    const result = await call("status");
+    const status = result.structuredContent?.status as Record<string, unknown>;
+    expect(status).toMatchObject({
+      folder: root,
+      reports: 1,
+      port,
+      receiver: "own",
+      initScript: { exists: false },
+      coverage,
+    });
+    const text = result.content[0]?.text ?? "";
+    expect(text).toContain(`listening on port ${port} for this folder`);
+    expect(text).toContain("stand.example.dev: 12 page(s)");
+    expect(text).toContain("no ");
+  });
+
+  test("a second session of the project sees the port as its own", async () => {
+    await client.close();
+    client = await connect(true);
+    const result = await call("status");
+    expect(result.structuredContent?.status).toMatchObject({ receiver: "own" });
+  });
+
+  test("status shows a taken port and an init-script for another port", async () => {
+    await writeFile(
+      join(root, "init-script.js"),
+      [
+        "(() => {",
+        '  const HOSTS = ["stand.example.dev"];',
+        '  var x = {version:"0.5.1"};',
+        "  rewindbug.init({",
+        `    endpoint: ${JSON.stringify(endpointOf(1, token))},`,
+        "  });",
+        "})();",
+      ].join("\n"),
+    );
+    const stranger = createServer((_, res) => res.writeHead(404).end());
+    await new Promise<void>((done) => stranger.listen(0, "127.0.0.1", done));
+    const address = stranger.address();
+    await client.close();
+    port = typeof address === "object" && address ? address.port : 0;
+    client = await connect(true);
+    const result = await call("status");
+    stranger.close();
+    expect(result.structuredContent?.status).toMatchObject({
+      receiver: "taken",
+      initScript: {
+        exists: true,
+        build: "0.5.1",
+        hosts: ["stand.example.dev"],
+        endpointMatches: false,
+      },
+    });
+    const text = result.content[0]?.text ?? "";
+    expect(text).toContain("does not know this folder's token");
+    expect(text).toContain("not this receiver's port and token");
   });
 });

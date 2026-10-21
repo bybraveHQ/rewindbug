@@ -7,6 +7,7 @@ import {
 } from "node:http";
 import { join, resolve } from "node:path";
 import { createGunzip } from "node:zlib";
+import { MAX_STARTED_BYTES, parseStarted, type Coverage } from "./coverage.ts";
 import { log } from "./log.ts";
 import {
   saveReport,
@@ -97,14 +98,14 @@ const inflate = (raw: Buffer): Promise<Buffer> =>
 // inflating: a small gzip bomb stops at MAX_BODY_BYTES. An oversized body is
 // still read to the end, without keeping it: closing the socket mid-upload
 // makes the client see a reset instead of 413; requestTimeout bounds it
-const readBody = (request: IncomingMessage): Promise<Buffer> =>
+const readRaw = (request: IncomingMessage, max: number): Promise<Buffer> =>
   new Promise((done, fail) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    let over = Number(request.headers["content-length"]) > MAX_COMPRESSED_BYTES;
+    let over = Number(request.headers["content-length"]) > max;
     request.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_COMPRESSED_BYTES) over = true;
+      if (size > max) over = true;
       if (!over) chunks.push(chunk);
     });
     request.on("error", () => fail(new HttpError(400)));
@@ -112,10 +113,15 @@ const readBody = (request: IncomingMessage): Promise<Buffer> =>
       if (over) return fail(new HttpError(413));
       const raw = Buffer.concat(chunks);
       if (raw.length === 0) return fail(new HttpError(400));
-      const gzip = raw[0] === GZIP_MAGIC[0] && raw[1] === GZIP_MAGIC[1];
-      done(gzip ? inflate(raw) : raw);
+      done(raw);
     });
   });
+
+const readBody = async (request: IncomingMessage): Promise<Buffer> => {
+  const raw = await readRaw(request, MAX_COMPRESSED_BYTES);
+  const gzip = raw[0] === GZIP_MAGIC[0] && raw[1] === GZIP_MAGIC[1];
+  return gzip ? inflate(raw) : raw;
+};
 
 const parseJson = (text: string): unknown => {
   try {
@@ -131,8 +137,11 @@ export const startReceiver = async (options: {
   token: string;
   // after a report is stored, before the page gets its answer: must not block
   onSaved?: (summary: BugSummary, report: ReadReport) => void;
+  // "rewindbug started on this page" beacons; without it they get 404
+  coverage?: Coverage;
 }): Promise<Receiver> => {
   const expected = digest(`/${options.token}`);
+  const expectedStarted = digest(`/${options.token}/started`);
   let hosts = new Set<string>();
 
   const respond = (response: ServerResponse, status: number) => {
@@ -159,6 +168,16 @@ export const startReceiver = async (options: {
     return 204;
   };
 
+  // a plain-text beacon, never gzip: anything off the shape is 400, nothing
+  // is written
+  const started = async (request: IncomingMessage): Promise<number> => {
+    const raw = await readRaw(request, MAX_STARTED_BYTES);
+    const signal = parseStarted(raw.toString("utf8"));
+    if (!signal) throw new HttpError(400);
+    options.coverage?.add(signal);
+    return 204;
+  };
+
   // order: Host, path, method, body; the raw url is compared as is,
   // nothing is parsed or normalized
   const handle = async (
@@ -166,14 +185,18 @@ export const startReceiver = async (options: {
     response: ServerResponse,
   ): Promise<void> => {
     if (!hosts.has(request.headers.host ?? "")) return respond(response, 421);
-    if (!timingSafeEqual(digest(request.url ?? ""), expected)) {
+    const url = digest(request.url ?? "");
+    const isReport = timingSafeEqual(url, expected);
+    const isStarted =
+      !!options.coverage && timingSafeEqual(url, expectedStarted);
+    if (!isReport && !isStarted) {
       response.writeHead(404).end();
       return;
     }
     if (request.method === "OPTIONS") return respond(response, 204);
     if (request.method !== "POST") return respond(response, 405);
     try {
-      respond(response, await receive(request));
+      respond(response, await (isReport ? receive(request) : started(request)));
     } catch (error) {
       if (!(error instanceof HttpError)) throw error;
       if (error.status === 413) response.setHeader("connection", "close");

@@ -1,13 +1,12 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { HOSTNAME } from "./coverage.ts";
 import { endpointOf, readOrCreateToken } from "./receiver.ts";
 
 // the agent's browser loads this file before every page's own scripts:
 // rewindbug starts on the named hosts only and sends to this receiver
 const BUILD = join("node_modules", "rewindbug", "dist", "rewindbug.global.js");
-const HOSTNAME =
-  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
 const PARAM = /^[\w.-]+$/;
 
 export type InitScriptOptions = {

@@ -587,9 +587,9 @@ export const shoot = async (
 // exports the same chromium, and under pnpm a test project resolves only it
 const PLAYWRIGHT_PACKAGES = ["playwright", "@playwright/test"];
 
-export const loadChromium = async (
+const playwrightCandidates = function* (
   dir: string,
-): Promise<Chromium | undefined> => {
+): Generator<{ name: string; path: string }> {
   const bases = [
     pathToFileURL(join(dirname(dir), "package.json")).href,
     import.meta.url,
@@ -597,19 +597,29 @@ export const loadChromium = async (
   ];
   for (const base of bases) {
     for (const name of PLAYWRIGHT_PACKAGES) {
-      let path: string;
       try {
-        path = createRequire(base).resolve(name);
+        yield { name, path: createRequire(base).resolve(name) };
       } catch {
-        continue;
+        // not installed from this base
       }
-      const module = (await import(pathToFileURL(path).href)) as {
-        chromium?: Chromium;
-        default?: { chromium?: Chromium };
-      };
-      const chromium = module.chromium ?? module.default?.chromium;
-      if (chromium) return chromium;
     }
+  }
+};
+
+// which package the renderer would load, without loading it
+export const findPlaywright = (dir: string): string | undefined =>
+  playwrightCandidates(dir).next().value?.name;
+
+export const loadChromium = async (
+  dir: string,
+): Promise<Chromium | undefined> => {
+  for (const { path } of playwrightCandidates(dir)) {
+    const module = (await import(pathToFileURL(path).href)) as {
+      chromium?: Chromium;
+      default?: { chromium?: Chromium };
+    };
+    const chromium = module.chromium ?? module.default?.chromium;
+    if (chromium) return chromium;
   }
   return undefined;
 };
