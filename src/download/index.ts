@@ -71,6 +71,8 @@ export const initDownload = (options: DownloadOptions = {}): boolean => {
   started = init({
     ...rest,
     endpoint: ENDPOINT,
+    // the endpoint is a placeholder: nothing would receive the signal
+    coverage: false,
     beforeSend: (report) => {
       const final = beforeSend ? beforeSend(report) : report;
       // an async beforeSend returns a promise, which init drops too

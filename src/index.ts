@@ -2,6 +2,7 @@ import type { BodyRule } from "./capture/network.ts";
 import { startCapture, type Capture } from "./capture/index.ts";
 import { startReplay } from "./replay/index.ts";
 import { startReport, type Reporter } from "./report/index.ts";
+import { sendStarted } from "./report/started.ts";
 import { playwrightTest, startSteps, stepsMarkdown } from "./steps/index.ts";
 import { defaultNetworkTrigger } from "./capture/network.ts";
 import type { Context, NetworkEntry, Report, Trigger } from "./types.ts";
@@ -36,6 +37,8 @@ export type InitOptions = {
   sampleRate?: number;
   beforeSend?: (report: Report) => Report | null;
   debug?: boolean;
+  // a beacon to <endpoint>/started tells the receiver the page is covered
+  coverage?: boolean;
   app?: Context["app"];
   tags?: Context["tags"];
 };
@@ -185,6 +188,7 @@ const start = (
   onTrigger = report.onTrigger;
   captureApi = capture;
   reporter = report;
+  if (options.coverage !== false) sendStarted(endpoint, filter);
 };
 
 // tags here are added to the init tags of this one report

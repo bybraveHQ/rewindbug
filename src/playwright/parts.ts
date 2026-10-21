@@ -48,6 +48,8 @@ export const initScript = (
 ): string => {
   const init = {
     endpoint: ENDPOINT,
+    // the endpoint is a placeholder: nothing would receive the signal
+    coverage: false,
     ...(options.bufferSeconds !== undefined && {
       bufferSeconds: options.bufferSeconds,
     }),

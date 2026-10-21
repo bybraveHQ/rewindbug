@@ -119,3 +119,30 @@ describe("init failures", () => {
     expect(init({ endpoint: "https://collect.example/r" })).toBe(false);
   });
 });
+
+describe("coverage signal", () => {
+  const beacon = vi.fn(() => true);
+  beforeEach(() => {
+    beacon.mockClear();
+    vi.stubGlobal("navigator", { ...navigator, sendBeacon: beacon });
+  });
+
+  test("a started page beacons once to <endpoint>/started", async () => {
+    const init = await load();
+    init(OPTIONS);
+    init(OPTIONS);
+    expect(beacon).toHaveBeenCalledTimes(1);
+    expect(beacon.mock.calls[0]).toContain(
+      "https://collect.example/report/started",
+    );
+  });
+
+  test("coverage: false and a failed init send nothing", async () => {
+    let init = await load();
+    init({ ...OPTIONS, coverage: false });
+    vi.resetModules();
+    init = await load();
+    init({ ...OPTIONS, endpoint: "ftp://collect.example" });
+    expect(beacon).not.toHaveBeenCalled();
+  });
+});
