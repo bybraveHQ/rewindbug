@@ -1,12 +1,12 @@
 # Changelog
 
-## 0.6.0 — unreleased
+## 0.6.0 — 2026-10-21
 
 An empty reports folder now tells "no errors" from "rewindbug never ran".
 
 - After a successful `init` the page sends one `sendBeacon` to `<endpoint>/started` with its host, its path through `urlFilter` (no query, no fragment) and the SDK version. On by default, `coverage: false` turns it off. A receiver without the path answers `404` and nothing happens on the page. `rewindbug/playwright` and `rewindbug/download` send none: their endpoint is a placeholder.
 
-## rewindbug-mcp 0.4.0 — unreleased
+## rewindbug-mcp 0.4.0 — 2026-10-21
 
 - The receiver accepts `/<token>/started` and counts pages per host in `.rewindbug/coverage.json`: pages, last time and path, SDK version, at most 50 hosts, written at most once a second. A signal off the shape gets `400` and writes nothing.
 - `last_bug` on an empty folder says on how many pages rewindbug started, or that it never did.

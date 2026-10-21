@@ -1,6 +1,6 @@
 {
   "name": "rewindbug",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Rewind the last seconds before a browser error into a ready bug report: steps, replay, console, network, Playwright test. No backend.",
   "license": "MIT",
   "funding": "https://ko-fi.com/bybrave",
