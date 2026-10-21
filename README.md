@@ -298,6 +298,7 @@ init({
 | `sampleRate`          | `1`                                           | share of page loads that start at all, `0.1` for one in ten. The choice is made once in `init`: a page load outside it records nothing and costs nothing                                                                                                                         |
 | `beforeSend`          | none                                          | `(report) => report \| null`, called before compression: change the report, or return `null` to drop it. It must be synchronous: a returned promise drops the report, and so does a `beforeSend` that throws                                                                     |
 | `debug`               | `false`                                       | `true` prints why `init` did not start                                                                                                                                                                                                                                           |
+| `coverage`            | `true`                                        | after a successful `init`, one beacon to `<endpoint>/started` with the page's host, its path through `urlFilter` and the SDK version, so the receiver can tell "no errors" from "never started". `false` sends nothing                                                           |
 | `app`, `tags`         | none                                          | `app: { release, environment }` and `tags: { key: "value" }`, copied into the report; `capture(error, { tags })` adds tags to one report                                                                                                                                         |
 
 A request that never gets a response is a network error. By default it is a trigger only when the request goes to the page's own site: the page host, its parent domain and that domain's subdomains (`app.shop.com` covers `shop.com` and `api.shop.com`; an IP address covers itself only). The parent is the host without its first label, so on `app.example.co.uk` it is `example.co.uk`, but on `example.co.uk` itself it is `co.uk`; pass your own `networkTrigger` there. A third-party script stopped by an ad blocker is not a bug of your page. A 5xx answer is a trigger from any host.
@@ -305,6 +306,8 @@ A request that never gets a response is a network error. By default it is a trig
 ## Where reports go
 
 The SDK posts each report with `fetch` and `credentials: "omit"`. When the tab is hidden or closed, queued reports of 60 KiB or less that are not already being sent go with `sendBeacon`. If the tab is closed, larger reports, reports still being compressed and requests still in flight are lost; a hidden tab keeps them queued. Any `2xx` answer removes a report from the queue; anything else keeps it for the next `flush()` or tab hide. A report handed to `sendBeacon` leaves the queue whether it arrives or not. Requests to your own endpoint are not recorded in reports. The queue lives in page memory: a reload drops it.
+
+Each page load where `init` succeeded also sends one `sendBeacon` to `<endpoint>/started` (the endpoint's path plus `/started`, its query kept) with `{"host","path","sdk"}` as `text/plain`: the host, the path through `urlFilter` without query or fragment, and the SDK version. `rewindbug-mcp` and `examples/endpoint` count these per host in `coverage.json`, so an empty reports folder says whether the package ran at all. A page where `init` returned `false` sends nothing. A server without the path answers `404`, and the page never notices. Turn it off with `coverage: false`.
 
 - **To a coding agent:** [`rewindbug-mcp`](packages/mcp/README.md) receives reports on localhost and hands the last bug to Claude Code or Cursor over MCP. Register it as shown in [With a coding agent](#with-a-coding-agent).
 - **To a folder on a server:** [`examples/endpoint`](examples/endpoint/README.md), two files on Node with a Docker image. It writes the folder layout `rewindbug-mcp` reads, plays the recordings in the browser behind a token of its own and, with a repo and a token set, opens a GitHub issue for every new bug with the steps and the test.
@@ -324,7 +327,8 @@ The SDK posts each report with `fetch` and `credentials: "omit"`. When the tab i
   - on another origin, answer with `Access-Control-Allow-Origin`: without it the browser hides the answer, and the report stays queued and comes again;
   - a report can arrive twice in other cases too: store it by its `id`;
   - no `Authorization` header can be sent: put a token in the path if you need one, knowing it is visible in your client code;
-  - allow bodies a bit over `maxReportBytes`, and add the endpoint to `connect-src` if your page has a Content Security Policy.
+  - allow bodies a bit over `maxReportBytes`, and add the endpoint to `connect-src` if your page has a Content Security Policy;
+  - `<endpoint>/started` gets the small coverage beacon described above: count it, answer `404`, or set `coverage: false`.
 
 ## Report format
 
@@ -366,6 +370,7 @@ The schema is version `0` and may still change between minor versions of the pac
 | login and password in URLs (`user:pass@`)                                                       | removed by the default filter                                                                                                                                                                                                                |
 | `#…` fragments containing `=`                                                                   | removed by the default filter                                                                                                                                                                                                                |
 | cookies, request headers, `localStorage`                                                        | never collected                                                                                                                                                                                                                              |
+| host and path of each page load where rewindbug started                                         | sent once per load to `<endpoint>/started`, the path through `urlFilter`, no query or fragment (`coverage`)                                                                                                                                  |
 
 A field counts as a password when it is or was `type="password"` when it got focus, when rrweb saw a "show password" toggle change it, or when its `autocomplete`, `name` or `id` contains `pass` or `pwd`. Such a field stays masked even with `maskInputs: false` or under `data-rb-unmask`, and its mask in the recording is always eight asterisks, so the length of the password is not kept either. A `value` attribute a framework rewrites on every key is left out of the recording for such a field, so the number and rhythm of the keys are not kept. A masked select also gets eight asterisks: its options are in the recording, and a mask as long as the chosen value would name it. A field the user cleared does not show the value the server rendered into it. `maskSelector`, `rb-block` and `data-rb-unmask` on the host of an open shadow root cover what renders inside it, in the recording and in the steps. A field that matches none of these is recorded as typed under `data-rb-unmask` or with `maskInputs: false`, so give a custom password field one of them.
 
@@ -384,7 +389,7 @@ Known gaps in this version:
 
 - secrets inside the URL path (`/reset/<token>`) are not cut;
 - text typed into `contenteditable` elements is visible in the recording unless they are under `maskSelector`;
-- `sendBeacon` when the tab is hidden or closed sends the endpoint's cookies: a beacon cannot omit them, `fetch` does;
+- `sendBeacon` when the tab is hidden or closed, and the coverage beacon on each page load, send the endpoint's cookies: a beacon cannot omit them, `fetch` does;
 - everything in a report came from the page, including text an attacker could have put there. Treat it as data, and read the generated test before you run it.
 
 ## Cost

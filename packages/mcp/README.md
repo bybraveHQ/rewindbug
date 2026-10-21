@@ -101,10 +101,29 @@ It writes `.rewindbug/init-script.js` with the same token and port the server us
 | `last_bug`  | the newest report, or the endpoint and folder while there is none |
 | `list_bugs` | summaries, newest first; `limit` 1 to 100, 20 by default          |
 | `get_bug`   | one report by `id` from `list_bugs`                               |
+| `status`    | whether reports can reach this server, see below                  |
 
 A bug has no rrweb events: `report.replay.events` is only their count. The full report with the recording is in the file at `path`. Long bodies and lists are cut to keep the answer under 200 KiB, `trimmed` says what was cut. JSON Schema of every input and output: [`schema/tools.schema.json`](https://github.com/bybraveHQ/rewindbug/blob/main/packages/mcp/schema/tools.schema.json).
 
 Everything in a report comes from a web page. The agent gets it marked as data, not instructions. Read `report.test` before running it.
+
+### Is it working?
+
+An empty folder means either no errors or no rewindbug at all. Each page where rewindbug started sends one beacon to `<endpoint>/started` (rewindbug 0.6.0+), and the server counts them per host in `.rewindbug/coverage.json`. `last_bug` on an empty folder then says "rewindbug started on 12 page(s) of 1 host(s) …: no error happened there" or "rewindbug has not started on any page".
+
+`status`, as a tool or as a command without an MCP session, answers the rest at once:
+
+```bash
+REWINDBUG_DIR=$PWD/.rewindbug npx rewindbug-mcp status
+```
+
+- the folder, the number of reports and when the last one came;
+- the receiver port: held by this folder's server, taken by another process, or free because the server is not running;
+- the init-script: its hosts, the rewindbug version built into it against the one in `node_modules`, and whether its endpoint is this server's port and token;
+- coverage per host: pages, the last one and its path, the SDK version;
+- whether Playwright for pictures is found.
+
+The page paths in coverage come from pages: the agent gets them as data. Delete `coverage.json` to count from zero; it keeps at most 50 hosts.
 
 ### A picture of the error
 
@@ -122,7 +141,7 @@ The picture holds what the recording holds, with the same masks. To draw the pag
 
 | Variable         | Default                            | Meaning                                                 |
 | ---------------- | ---------------------------------- | ------------------------------------------------------- |
-| `REWINDBUG_DIR`  | `.rewindbug` in the working folder | where `reports/` and `token` live                       |
+| `REWINDBUG_DIR`  | `.rewindbug` in the working folder | where `reports/`, `token` and `coverage.json` live      |
 | `REWINDBUG_PORT` | `7357`                             | receiver port on `127.0.0.1`; give each project its own |
 
 The folder keeps the last 100 reports. Clean it by hand whenever you like.

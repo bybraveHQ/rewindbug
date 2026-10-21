@@ -87,7 +87,7 @@ Beyond loopback the server does not start without a token, unless `REWINDBUG_OPE
 
 ## What it stores
 
-Each report is a pair in `reports/`: `<received>-<id>.json`, the full report with the rrweb recording, and `<received>-<id>.summary.json`, a short summary for listings, plus `<received>-<id>.png` when a picture was rendered. The last 100 reports are kept; a report sent again under the same id keeps the first copy. The report format: [Report format](../../README.md#report-format). `issues.json` next to `reports/` maps fingerprints to GitHub issues.
+Each report is a pair in `reports/`: `<received>-<id>.json`, the full report with the rrweb recording, and `<received>-<id>.summary.json`, a short summary for listings, plus `<received>-<id>.png` when a picture was rendered. The last 100 reports are kept; a report sent again under the same id keeps the first copy. The report format: [Report format](../../README.md#report-format). `issues.json` next to `reports/` maps fingerprints to GitHub issues. `coverage.json` next to it counts the pages where rewindbug started, per host: pages, the last time and path, the SDK version (rewindbug 0.6.0+ beacons to `<path>/started` once per page load). Delete it to count from zero; it keeps at most 50 hosts.
 
 To hand the reports to a coding agent, start `rewindbug-mcp` with the same folder in `REWINDBUG_DIR`. Its own receiver is then not needed, but it does no harm.
 
@@ -96,13 +96,13 @@ To hand the reports to a coding agent, start `rewindbug-mcp` with the same folde
 | Status | When                                                                                                                       |
 | ------ | -------------------------------------------------------------------------------------------------------------------------- |
 | `200`  | `GET /view`, the viewer page; with the view token in `Authorization: Bearer`, `/view/list` or a report `/view/<name>.json` |
-| `204`  | stored                                                                                                                     |
+| `204`  | stored; for `<path>/started`, counted                                                                                      |
 | `400`  | not JSON, broken gzip, or a field `rewindbug-mcp` needs is off                                                             |
 | `401`  | the list or a report without the view token, or with a wrong one                                                           |
 | `403`  | on loopback, a post from a page on another site                                                                            |
 | `404`  | another path, a wrong token, or a report that is not there                                                                 |
 | `405`  | not `POST` or `OPTIONS` on the report path                                                                                 |
-| `413`  | over 2 MiB compressed or 32 MiB inflated                                                                                   |
+| `413`  | over 2 MiB compressed or 32 MiB inflated; a `started` beacon over 4 KiB                                                    |
 | `421`  | foreign `Host` on loopback                                                                                                 |
 | `500`  | the folder cannot be written                                                                                               |
 | `503`  | four reports are already being received; send it again later. A report sent with `sendBeacon` on tab close is lost then    |
